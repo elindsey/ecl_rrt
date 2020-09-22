@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul, Sub};
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 struct V3(f32, f32, f32);
 
 impl V3 {
@@ -82,6 +82,7 @@ impl Mul<f32> for V3 {
     }
 }
 
+#[derive(Debug)]
 struct Camera {
     origin: V3,
     x: V3,
@@ -89,7 +90,7 @@ struct Camera {
     z: V3,
     viewport_lower_left: V3,
     viewport_width: f32,
-    viewport_height: f32
+    viewport_height: f32,
 }
 
 impl Camera {
@@ -106,7 +107,36 @@ impl Camera {
         let viewport_lower_left = origin - z - y * 0.5 * viewport_height - x * 0.5 * viewport_width;
 
         Camera {
-            origin, x, y, z, viewport_lower_left, viewport_width, viewport_height
+            origin,
+            x,
+            y,
+            z,
+            viewport_lower_left,
+            viewport_width,
+            viewport_height,
+        }
+    }
+}
+
+enum Material {
+    Diffuse { emit_color: V3, reflect_color: V3 },
+    Specular { emit_color: V3, reflect_color: V3 },
+}
+
+struct Sphere {
+    p: V3,
+    r: f32,
+    inv_r: f32,
+    m: Material,
+}
+
+impl Sphere {
+    fn new(p: V3, r: f32, m: Material) -> Sphere {
+        Sphere {
+            p,
+            r,
+            inv_r: 1.0 / r,
+            m
         }
     }
 }
