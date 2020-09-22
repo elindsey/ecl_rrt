@@ -171,13 +171,8 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
-// TODO: replace this slow crud
-fn randf01() -> f32 {
-    let mut rng = rand::thread_rng();
-    rng.gen()
-}
-
 fn cast(bg: &Material, spheres: &Vec<Sphere>, origin: V3, dir: V3, bounces: u32) -> V3 {
+    //assert!(dir.is_unit_vector());
     let mut hit_dist = f32::MAX;
     let mut hit_material = bg;
     let mut hit_p = V3(0.0, 0.0, 0.0);
@@ -288,8 +283,6 @@ fn main() {
     let width = 800;
     let height = 600;
     let rays_per_pixel = 10;
-    // TODO: image-rs lib will expect a u8s
-    //let mut pixels: Vec<u8> = Vec::with_capacity(width * height * 3);
     let pixel_width = 3;
     let mut pixels: Vec<u8> = vec![0; width * height * pixel_width]; // TODO: fix wasteful zero init
     let cam = Camera::new(
@@ -307,8 +300,9 @@ fn main() {
             let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
-                let rand_x = randf01();
-                let rand_y = randf01();
+                let mut rng = rand::thread_rng();
+                let rand_x: f32 = rng.gen();
+                let rand_y: f32 = rng.gen();
                 let viewport_y = cam.y * cam.viewport_height * (image_y as f32 + rand_y) * inv_height;
                 let viewport_x = cam.x * cam.viewport_width * (image_x as f32 + rand_x) * inv_width;
                 let viewport_p = cam.viewport_lower_left + viewport_x + viewport_y;
