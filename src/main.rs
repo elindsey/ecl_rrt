@@ -1,7 +1,7 @@
 use std::ops::{Add, Mul, Sub};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct V3(pub f32, pub f32, pub f32);
+struct V3(f32, f32, f32);
 
 impl V3 {
     fn dot(self, other: V3) -> f32 {
@@ -79,6 +79,35 @@ impl Mul<f32> for V3 {
 
     fn mul(self, other: f32) -> Self {
         Self(self.0 * other, self.1 * other, self.2 * other)
+    }
+}
+
+struct Camera {
+    origin: V3,
+    x: V3,
+    y: V3,
+    z: V3,
+    viewport_lower_left: V3,
+    viewport_width: f32,
+    viewport_height: f32
+}
+
+impl Camera {
+    fn new(look_from: V3, look_at: V3, aspect_ratio: f32) -> Camera {
+        assert!(aspect_ratio > 1.0, "width > height only");
+
+        let origin = look_from - look_at;
+        let z = origin.normalize();
+        let x = V3(0.0, 0.0, 1.0).cross(z).normalize();
+        let y = z.cross(x).normalize();
+
+        let viewport_height = 1.0;
+        let viewport_width = viewport_height * aspect_ratio;
+        let viewport_lower_left = origin - z - y * 0.5 * viewport_height - x * 0.5 * viewport_width;
+
+        Camera {
+            origin, x, y, z, viewport_lower_left, viewport_width, viewport_height
+        }
     }
 }
 
