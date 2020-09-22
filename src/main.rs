@@ -118,6 +118,7 @@ impl Camera {
     }
 }
 
+#[derive(Debug, Clone)]
 enum Material {
     Diffuse { emit_color: V3, reflect_color: V3 },
     Specular { emit_color: V3, reflect_color: V3 },
@@ -136,18 +137,52 @@ impl Sphere {
             p,
             r,
             inv_r: 1.0 / r,
-            m
+            m,
         }
     }
 }
 
 fn main() {
+    // Materials
+    let bg = Material::Specular {
+        emit_color: V3(0.3, 0.4, 0.8),
+        reflect_color: V3(0.0, 0.0, 0.0),
+    };
+    let ground = Material::Diffuse {
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(0.5, 0.5, 0.5),
+    };
+    let left = Material::Specular {
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(1.0, 0.0, 0.0),
+    };
+    let center = Material::Specular {
+        emit_color: V3(0.4, 0.8, 0.9),
+        reflect_color: V3(0.8, 0.8, 0.8),
+    };
+    let right = Material::Specular {
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(0.95, 0.95, 0.95),
+    };
+
+    let mut spheres = Vec::new();
+    spheres.push(Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground));
+    spheres.push(Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center));
+    spheres.push(Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
+    spheres.push(Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
+    spheres.push(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left));
+    spheres.push(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right));
+
     let width = 1920;
     let height = 1080;
     let rays_per_pixel = 1000;
     // TODO can I drop this type annotation once I use pixels?
     let pixels: Vec<u32> = Vec::with_capacity(width * height);
-    let cam = Camera::new(V3(0.0, -10.0, 1.0), V3(0.0, 0.0, 0.0), width as f32/height as f32);
+    let cam = Camera::new(
+        V3(0.0, -10.0, 1.0),
+        V3(0.0, 0.0, 0.0),
+        width as f32 / height as f32,
+    );
 
     let v3 = V3(1.0, 1.0, 1.0);
     let v3 = v3 + 2.0;
