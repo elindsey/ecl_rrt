@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul, Sub};
+use std::{ops::{Add, Mul, Sub}};
 
 #[derive(Debug, Copy, Clone)]
 struct V3(f32, f32, f32);
@@ -142,6 +142,19 @@ impl Sphere {
     }
 }
 
+// https://entropymine.com/imageworsener/srgbformula/
+fn linear_to_srgb(x: f32) -> f32 {
+    if x < 0.0 {
+        0.0
+    } else if x > 1.0 {
+        1.0
+    } else if x > 0.0031308 {
+        1.055 * x.powf(1.0 / 2.4) - 0.055
+    } else {
+        x * 12.92
+    }
+}
+
 fn main() {
     // Materials
     let bg = Material::Specular {
@@ -173,11 +186,15 @@ fn main() {
     spheres.push(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left));
     spheres.push(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right));
 
-    let width = 1920;
-    let height = 1080;
+    //let width = 1920;
+    //let height = 1080;
+    let width = 800;
+    let height = 600;
     let rays_per_pixel = 100;
     // TODO: image-rs lib will expect a u8s
-    let mut pixels: Vec<u32> = Vec::with_capacity(width * height);
+    //let mut pixels: Vec<u8> = Vec::with_capacity(width * height * 3);
+    let pixel_width = 3;
+    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width]; // TODO: fix wasteful zero init
     let cam = Camera::new(
         V3(0.0, -10.0, 1.0),
         V3(0.0, 0.0, 0.0),
@@ -187,11 +204,15 @@ fn main() {
     // TODO: test this as an iteration over pixels, may elide bounds checking
     for image_y in 0..height {
         for image_x in 0..width {
-            let mut color = V3(0.0, 0.0, 0.0);
+            let color = V3(0.3, 0.3, 0.3);
 
-            pixels[image_y * width + image_x] = 0;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
         }
     }
+
+    image::save_buffer("out.png", &pixels, width as u32, height as u32, image::ColorType::Rgb8).unwrap();
 
     let v3 = V3(1.0, 1.0, 1.0);
     let v3 = v3 + 2.0;
