@@ -304,7 +304,7 @@ fn main() {
             let inv_height = 1.0 / (height as f32 - 1.0);
             let inv_width = 1.0 / (width as f32 - 1.0);
 
-            let mut color = V3(0.3, 0.3, 0.3);
+            let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
                 let rand_x = randf01();
