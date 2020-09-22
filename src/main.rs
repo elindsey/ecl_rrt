@@ -53,9 +53,7 @@ impl Add<f32> for V3 {
 
 impl AddAssign for V3 {
     fn add_assign(&mut self, other: Self) {
-        self.0 += other.0;
-        self.1 += other.1;
-        self.2 += other.2;
+        *self = Self(self.0 + other.0, self.1 + other.1, self.2 + other.2)
     }
 }
 
