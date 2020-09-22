@@ -1,6 +1,7 @@
-use std::{ops::{Add, Mul, Sub}};
+use std::{f32::consts::PI, ops::{Add, AddAssign, Mul, Sub}};
+use rand::prelude::*;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct V3(f32, f32, f32);
 
 impl V3 {
@@ -47,6 +48,14 @@ impl Add<f32> for V3 {
 
     fn add(self, other: f32) -> Self {
         Self(self.0 + other, self.1 + other, self.2 + other)
+    }
+}
+
+impl AddAssign for V3 {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0;
+        self.1 += other.1;
+        self.2 += other.2;
     }
 }
 
@@ -118,10 +127,17 @@ impl Camera {
     }
 }
 
-#[derive(Debug, Clone)]
-enum Material {
-    Diffuse { emit_color: V3, reflect_color: V3 },
-    Specular { emit_color: V3, reflect_color: V3 },
+#[derive(Debug, Clone, PartialEq)]
+enum MaterialType {
+    Diffuse,
+    Specular,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Material {
+    emit_color: V3,
+    reflect_color: V3,
+    t: MaterialType,
 }
 
 struct Sphere {
@@ -155,27 +171,108 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
+// TODO: replace this slow crud
+fn randf01() -> f32 {
+    let mut rng = rand::thread_rng();
+    rng.gen()
+}
+
+fn cast(bg: &Material, spheres: &Vec<Sphere>, origin: V3, dir: V3, bounces: u32) -> V3 {
+    let mut hit_dist = f32::MAX;
+    let mut hit_material = bg;
+    let mut hit_p = V3(0.0, 0.0, 0.0);
+    let mut hit_normal = V3(0.0, 0.0, 0.0);
+    let tolerance = 0.0001;
+
+    for s in spheres {
+        let sphere_relative_origin = origin - s.p;
+        let b = dir.dot(sphere_relative_origin);
+        let c = sphere_relative_origin.dot(sphere_relative_origin) - s.r * s.r;
+        let discr = b * b - c;
+
+        if discr > 0.0 {
+            // at least one real root, meaning we've hit the sphere
+            let root_term = discr.sqrt();
+            if root_term > tolerance {
+                // Order here matters. root_term is positive; b may be positive or negative
+                //
+                // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
+                // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
+                // must be first.
+                //
+                // Second case is less interesting
+                // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
+                let t = -b - root_term; // -b minus pos
+                if t > tolerance && t < hit_dist {
+                    hit_dist = t;
+                    hit_material = &s.m;
+                    hit_p = origin + dir * hit_dist;
+                    // normalize with mulf by 1/s->r, b/c length of that vector is the radius
+                    hit_normal = (hit_p - s.p) * s.inv_r;
+                    continue;
+                }
+                let t = -b + root_term; // -b plus pos
+                if t > tolerance && t < hit_dist {
+                    hit_dist = t;
+                    hit_material = &s.m;
+                    hit_p = origin + dir * hit_dist;
+                    // normalize with mulf by 1/s->r, b/c length of that vector is the radius
+                    hit_normal = (hit_p - s.p) * s.inv_r;
+                    continue;
+                }
+
+            }
+        }
+    }
+
+    if hit_material != bg {
+        if bounces > 0 {
+            let new_dir = match hit_material.t {
+                MaterialType::Specular => dir.reflect(hit_normal),
+                MaterialType::Diffuse => {
+                    let mut rng = rand::thread_rng();
+                    let a = rng.gen_range(0.0, 2.0 * PI);
+                    let z = rng.gen_range(-1.0, 1.0f32); // technically should be [-1, 1], but close enough
+                    let r = (1.0 - z * z).sqrt();
+                    V3(r * a.cos(), r * a.sin(), z)
+                }
+            };
+
+            hit_material.emit_color + hit_material.reflect_color * cast(bg, spheres, hit_p, new_dir, bounces-1)
+        } else {
+            hit_material.emit_color
+        }
+    } else {
+        bg.emit_color
+    }
+}
+
 fn main() {
     // Materials
-    let bg = Material::Specular {
+    let bg = Material {
         emit_color: V3(0.3, 0.4, 0.8),
         reflect_color: V3(0.0, 0.0, 0.0),
+        t: MaterialType::Specular,
     };
-    let ground = Material::Diffuse {
+    let ground = Material {
         emit_color: V3(0.0, 0.0, 0.0),
         reflect_color: V3(0.5, 0.5, 0.5),
+        t: MaterialType::Diffuse,
     };
-    let left = Material::Specular {
+    let left = Material {
         emit_color: V3(0.0, 0.0, 0.0),
         reflect_color: V3(1.0, 0.0, 0.0),
+        t: MaterialType::Specular,
     };
-    let center = Material::Specular {
+    let center = Material {
         emit_color: V3(0.4, 0.8, 0.9),
         reflect_color: V3(0.8, 0.8, 0.8),
+        t: MaterialType::Specular,
     };
-    let right = Material::Specular {
+    let right = Material {
         emit_color: V3(0.0, 0.0, 0.0),
         reflect_color: V3(0.95, 0.95, 0.95),
+        t: MaterialType::Specular,
     };
 
     let mut spheres = Vec::new();
@@ -190,7 +287,7 @@ fn main() {
     //let height = 1080;
     let width = 800;
     let height = 600;
-    let rays_per_pixel = 100;
+    let rays_per_pixel = 10;
     // TODO: image-rs lib will expect a u8s
     //let mut pixels: Vec<u8> = Vec::with_capacity(width * height * 3);
     let pixel_width = 3;
@@ -204,17 +301,34 @@ fn main() {
     // TODO: test this as an iteration over pixels, may elide bounds checking
     for image_y in 0..height {
         for image_x in 0..width {
-            let color = V3(0.3, 0.3, 0.3);
+            let inv_height = 1.0 / (height as f32 - 1.0);
+            let inv_width = 1.0 / (width as f32 - 1.0);
+
+            let mut color = V3(0.3, 0.3, 0.3);
+            for _ in 0..rays_per_pixel {
+                // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
+                let rand_x = randf01();
+                let rand_y = randf01();
+                let viewport_y = cam.y * cam.viewport_height * (image_y as f32 + rand_y) * inv_height;
+                let viewport_x = cam.x * cam.viewport_width * (image_x as f32 + rand_x) * inv_width;
+                let viewport_p = cam.viewport_lower_left + viewport_x + viewport_y;
+
+                // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                // to do this we take the start of that range (what we calculated as the image projecting onto our viewport),
+                // then add a random [0,1) float
+                let ray_p = cam.origin;
+                let ray_dir = (viewport_p - cam.origin).normalize();
+                color += cast(&bg, &spheres, ray_p, ray_dir, 8);
+            }
 
             pixels[image_y * width * pixel_width + image_x * pixel_width + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
             pixels[image_y * width * pixel_width + image_x * pixel_width + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
             pixels[image_y * width * pixel_width + image_x * pixel_width + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
         }
+        println!("height {}", image_y);
     }
 
     image::save_buffer("out.png", &pixels, width as u32, height as u32, image::ColorType::Rgb8).unwrap();
 
-    let v3 = V3(1.0, 1.0, 1.0);
-    let v3 = v3 + 2.0;
-    println!("Hello, world! {:?}", v3);
+    println!("Fin.");
 }
