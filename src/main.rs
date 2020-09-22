@@ -142,6 +142,13 @@ impl Sphere {
 }
 
 fn main() {
+    let width = 1920;
+    let height = 1080;
+    let rays_per_pixel = 1000;
+    // TODO can I drop this type annotation once I use pixels?
+    let pixels: Vec<u32> = Vec::with_capacity(width * height);
+    let cam = Camera::new(V3(0.0, -10.0, 1.0), V3(0.0, 0.0, 0.0), width as f32/height as f32);
+
     let v3 = V3(1.0, 1.0, 1.0);
     let v3 = v3 + 2.0;
     println!("Hello, world! {:?}", v3);
