@@ -209,9 +209,7 @@ fn cast(
 ) -> V3 {
     //assert!(dir.is_unit_vector());
     let mut hit_dist = f32::MAX;
-    let mut hit_material = bg;
-    let mut hit_p = V3(0.0, 0.0, 0.0);
-    let mut hit_normal = V3(0.0, 0.0, 0.0);
+    let mut hit_sphere: Option<&Sphere> = None;
     let tolerance = 0.0001;
 
     for s in spheres {
@@ -235,45 +233,44 @@ fn cast(
                 let t = -b - root_term; // -b minus pos
                 if t > tolerance && t < hit_dist {
                     hit_dist = t;
-                    hit_material = &s.m;
-                    hit_p = origin + dir * hit_dist;
-                    // normalize with mulf by 1/s->r, b/c length of that vector is the radius
-                    hit_normal = (hit_p - s.p) * s.inv_r;
+                    hit_sphere = Some(s);
                     continue;
                 }
                 let t = -b + root_term; // -b plus pos
                 if t > tolerance && t < hit_dist {
                     hit_dist = t;
-                    hit_material = &s.m;
-                    hit_p = origin + dir * hit_dist;
-                    // normalize with mulf by 1/s->r, b/c length of that vector is the radius
-                    hit_normal = (hit_p - s.p) * s.inv_r;
+                    hit_sphere = Some(s);
                     continue;
                 }
             }
         }
     }
 
-    if hit_material != bg {
-        if bounces > 0 {
-            let new_dir = match hit_material.t {
-                MaterialType::Specular => dir.reflect(hit_normal),
-                MaterialType::Diffuse => {
-                    let a = randf_range(rng_state, 0.0, 2.0 * PI);
-                    let z = randf_range(rng_state, -1.0, 1.0f32); // technically should be [-1, 1], but close enough
-                    let r = (1.0 - z * z).sqrt();
-                    V3(r * a.cos(), r * a.sin(), z)
-                }
-            };
+    match hit_sphere {
+        Some(s) => {
+            let hit_material = &s.m;
+            let hit_p = origin + dir * hit_dist;
+            // normalize with mulf by 1/s->r, b/c length of that vector is the radius
+            let hit_normal = (hit_p - s.p) * s.inv_r;
+            if bounces > 0 {
+                let new_dir = match hit_material.t {
+                    MaterialType::Specular => dir.reflect(hit_normal),
+                    MaterialType::Diffuse => {
+                        let a = randf_range(rng_state, 0.0, 2.0 * PI);
+                        let z = randf_range(rng_state, -1.0, 1.0f32); // technically should be [-1, 1], but close enough
+                        let r = (1.0 - z * z).sqrt();
+                        V3(r * a.cos(), r * a.sin(), z)
+                    }
+                };
 
-            hit_material.emit_color
-                + hit_material.reflect_color
-                    * cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state)
-        } else {
-            hit_material.emit_color
+                hit_material.emit_color
+                    + hit_material.reflect_color
+                        * cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state)
+            } else {
+                hit_material.emit_color
+            }
         }
-    } else {
-        bg.emit_color
+        None => bg.emit_color,
     }
 }
 
