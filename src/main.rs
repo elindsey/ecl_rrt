@@ -340,7 +340,7 @@ fn main() {
         .par_chunks_mut(width * pixel_width)
         .enumerate()
         .for_each(|(i, chunk)| {
-            let mut rng_state = rand::thread_rng().next_u32();
+            let mut rng_state = rand::thread_rng().next_u32(); // bit wasteful to reseed on every chunk
             let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
             for image_x in 0..width {
                 let mut color = V3(0.0, 0.0, 0.0);
