@@ -1,5 +1,9 @@
-use std::{f32::consts::PI, ops::{Add, AddAssign, Mul, Sub}};
 use rand::prelude::*;
+use std::{
+    f32::consts::PI,
+    ops::{Add, AddAssign, Mul, Sub},
+    time::Instant,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct V3(f32, f32, f32);
@@ -169,7 +173,34 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
-fn cast(bg: &Material, spheres: &Vec<Sphere>, origin: V3, dir: V3, bounces: u32) -> V3 {
+// Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
+fn xorshift(state: &mut u32) -> u32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
+fn randf01(state: &mut u32) -> f32 {
+    let randu = (xorshift(state) >> 9) | 0x3f800000;
+    let randf = unsafe { std::mem::transmute::<u32, f32>(randu) } - 1.0;
+    randf
+}
+
+fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
+    min + (max - min) * randf01(state)
+}
+
+fn cast(
+    bg: &Material,
+    spheres: &Vec<Sphere>,
+    origin: V3,
+    dir: V3,
+    bounces: u32,
+    rng_state: &mut u32,
+) -> V3 {
     //assert!(dir.is_unit_vector());
     let mut hit_dist = f32::MAX;
     let mut hit_material = bg;
@@ -213,7 +244,6 @@ fn cast(bg: &Material, spheres: &Vec<Sphere>, origin: V3, dir: V3, bounces: u32)
                     hit_normal = (hit_p - s.p) * s.inv_r;
                     continue;
                 }
-
             }
         }
     }
@@ -223,15 +253,16 @@ fn cast(bg: &Material, spheres: &Vec<Sphere>, origin: V3, dir: V3, bounces: u32)
             let new_dir = match hit_material.t {
                 MaterialType::Specular => dir.reflect(hit_normal),
                 MaterialType::Diffuse => {
-                    let mut rng = rand::thread_rng();
-                    let a = rng.gen_range(0.0, 2.0 * PI);
-                    let z = rng.gen_range(-1.0, 1.0f32); // technically should be [-1, 1], but close enough
+                    let a = randf_range(rng_state, 0.0, 2.0 * PI);
+                    let z = randf_range(rng_state, -1.0, 1.0f32); // technically should be [-1, 1], but close enough
                     let r = (1.0 - z * z).sqrt();
                     V3(r * a.cos(), r * a.sin(), z)
                 }
             };
 
-            hit_material.emit_color + hit_material.reflect_color * cast(bg, spheres, hit_p, new_dir, bounces-1)
+            hit_material.emit_color
+                + hit_material.reflect_color
+                    * cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state)
         } else {
             hit_material.emit_color
         }
@@ -276,13 +307,12 @@ fn main() {
     spheres.push(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left));
     spheres.push(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right));
 
-    //let width = 1920;
-    //let height = 1080;
-    let width = 800;
-    let height = 600;
-    let rays_per_pixel = 10;
+    let width = 1920;
+    let height = 1080;
+    let rays_per_pixel = 100;
+    let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
-    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width]; // TODO: fix wasteful zero init
+    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
     let cam = Camera::new(
         V3(0.0, -10.0, 1.0),
         V3(0.0, 0.0, 0.0),
@@ -290,6 +320,8 @@ fn main() {
     );
 
     // TODO: test this as an iteration over pixels, may elide bounds checking
+    let start = Instant::now();
+    let mut rng_state = rand::thread_rng().next_u32();
     for image_y in 0..height {
         for image_x in 0..width {
             let inv_height = 1.0 / (height as f32 - 1.0);
@@ -298,10 +330,10 @@ fn main() {
             let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
-                let mut rng = rand::thread_rng();
-                let rand_x: f32 = rng.gen();
-                let rand_y: f32 = rng.gen();
-                let viewport_y = cam.y * cam.viewport_height * (image_y as f32 + rand_y) * inv_height;
+                let rand_x: f32 = randf01(&mut rng_state);
+                let rand_y: f32 = randf01(&mut rng_state);
+                let viewport_y =
+                    cam.y * cam.viewport_height * (image_y as f32 + rand_y) * inv_height;
                 let viewport_x = cam.x * cam.viewport_width * (image_x as f32 + rand_x) * inv_width;
                 let viewport_p = cam.viewport_lower_left + viewport_x + viewport_y;
 
@@ -310,17 +342,31 @@ fn main() {
                 // then add a random [0,1) float
                 let ray_p = cam.origin;
                 let ray_dir = (viewport_p - cam.origin).normalize();
-                color += cast(&bg, &spheres, ray_p, ray_dir, 8);
+                color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
             }
 
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] = (255.0 * linear_to_srgb(color.0/rays_per_pixel as f32)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] = (255.0 * linear_to_srgb(color.1/rays_per_pixel as f32)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] = (255.0 * linear_to_srgb(color.2/rays_per_pixel as f32)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] =
+                (255.0 * linear_to_srgb(color.0 * inv_rays_per_pixels as f32)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] =
+                (255.0 * linear_to_srgb(color.1 * inv_rays_per_pixels as f32)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] =
+                (255.0 * linear_to_srgb(color.2 * inv_rays_per_pixels as f32)) as u8;
         }
-        println!("height {}", image_y);
+        //println!("height {}", image_y);
     }
+    println!("computation took {}ms", start.elapsed().as_millis());
 
-    image::save_buffer("out.png", &pixels, width as u32, height as u32, image::ColorType::Rgb8).unwrap();
+    // TODO: bug, image is upside down
+    let start = Instant::now();
+    image::save_buffer(
+        "out.png",
+        &pixels,
+        width as u32,
+        height as u32,
+        image::ColorType::Rgb8,
+    )
+    .unwrap();
+    println!("writing file took {}ms", start.elapsed().as_millis());
 
     println!("Fin.");
 }
