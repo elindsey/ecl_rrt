@@ -221,13 +221,13 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &S
             //
             // Second case is less interesting
             // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
-            let t = -b - root_term; // -b minus pos
+            let t = -b - root_term; // -b minus positive
             if t > tolerance && t < hit_dist {
                 hit_dist = t;
                 hit_sphere = Some(s);
                 continue;
             }
-            let t = -b + root_term; // -b plus pos
+            let t = -b + root_term; // -b plus positive
             if t > tolerance && t < hit_dist {
                 hit_dist = t;
                 hit_sphere = Some(s);
