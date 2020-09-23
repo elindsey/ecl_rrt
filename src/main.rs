@@ -113,7 +113,7 @@ struct Camera {
 
 impl Camera {
     fn new(look_from: V3, look_at: V3, aspect_ratio: f32) -> Camera {
-        assert!(aspect_ratio > 1.0, "width > height only");
+        assert!(aspect_ratio > 1.0, "width must be greater than height");
 
         let origin = look_from - look_at;
         let z = origin.normalize();
@@ -323,7 +323,7 @@ fn main() {
 
     let width = 1920;
     let height = 1080;
-    let rays_per_pixel = 1000;
+    let rays_per_pixel = 100;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
     let cam = Camera::new(
