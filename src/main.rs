@@ -256,9 +256,9 @@ fn cast(
     let hit = intersect_world(spheres, origin, dir);
     match hit {
         Some((hit_p, s)) => {
-            let hit_material = &s.m;
+            let hit_m = &s.m;
             if bounces > 0 {
-                let new_dir = match hit_material.t {
+                let new_dir = match hit_m.t {
                     MaterialType::Specular => {
                         // normalize with mulf by 1/s->r, b/c length of that vector is the radius
                         let hit_normal = (hit_p - s.p) * s.inv_r;
@@ -273,11 +273,10 @@ fn cast(
                     }
                 };
 
-                hit_material.emit_color
-                    + hit_material.reflect_color
-                        * cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state)
+                let bounced_color = cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state);
+                hit_m.emit_color + hit_m.reflect_color * bounced_color
             } else {
-                hit_material.emit_color
+                hit_m.emit_color
             }
         }
         None => bg.emit_color,
