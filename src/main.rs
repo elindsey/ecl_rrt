@@ -340,18 +340,18 @@ fn main() {
         for image_x in 0..width {
             let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
-                // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
+                // calculate ratio we've moved along the image (y/height), step proportionally within the film
                 let rand_x: f32 = randf01(&mut rng_state);
                 let rand_y: f32 = randf01(&mut rng_state);
-                let viewport_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
-                let viewport_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
-                let viewport_p = cam.film_lower_left + viewport_x + viewport_y;
+                let film_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
+                let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                let film_p = cam.film_lower_left + film_x + film_y;
 
                 // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                // to do this we take the start of that range (what we calculated as the image projecting onto our viewport),
+                // to do this we take the start of that range (what we calculated as the image projecting onto our film),
                 // then add a random [0,1) float
                 let ray_p = cam.origin;
-                let ray_dir = (viewport_p - cam.origin).normalize();
+                let ray_dir = (film_p - cam.origin).normalize();
                 color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
             }
 
