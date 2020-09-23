@@ -1,3 +1,4 @@
+use rand::prelude::*;
 use rayon::prelude::*;
 use std::{
     f32::consts::PI,
@@ -339,7 +340,7 @@ fn main() {
         .par_chunks_mut(width * pixel_width)
         .enumerate()
         .for_each_init(
-            || rayon::current_thread_index().unwrap() as u32,
+            || rand::thread_rng().next_u32(),
             |rng_state, (i, chunk)| {
                 let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
                 for image_x in 0..width {

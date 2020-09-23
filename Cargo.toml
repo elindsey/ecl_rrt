@@ -8,4 +8,5 @@ edition = "2018"
 
 [dependencies]
 image = { version = "0.23", default-features = false, features = ["png"] }
+rand = "0.7"
 rayon = "1.4"
