@@ -1,4 +1,5 @@
 use rand::prelude::*;
+use rayon::prelude::*;
 use std::{
     f32::consts::PI,
     ops::{Add, AddAssign, Mul, MulAssign, Sub},
@@ -322,7 +323,7 @@ fn main() {
 
     let width = 1920;
     let height = 1080;
-    let rays_per_pixel = 50;
+    let rays_per_pixel = 1000;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
     let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
@@ -335,37 +336,39 @@ fn main() {
     let start = Instant::now();
     let inv_height = 1.0 / (height as f32 - 1.0);
     let inv_width = 1.0 / (width as f32 - 1.0);
-    let mut rng_state = rand::thread_rng().next_u32();
-    let pixel_chunks = pixels.chunks_mut(width * pixel_width);
-    for (i, chunk) in pixel_chunks.into_iter().enumerate() {
-        let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
-        for image_x in 0..width {
-            let mut color = V3(0.0, 0.0, 0.0);
-            for _ in 0..rays_per_pixel {
-                // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                let rand_x: f32 = randf01(&mut rng_state);
-                let rand_y: f32 = randf01(&mut rng_state);
-                let film_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
-                let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
-                let film_p = cam.film_lower_left + film_x + film_y;
+    pixels
+        .par_chunks_mut(width * pixel_width)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let mut rng_state = rand::thread_rng().next_u32();
+            let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
+            for image_x in 0..width {
+                let mut color = V3(0.0, 0.0, 0.0);
+                for _ in 0..rays_per_pixel {
+                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                    let rand_x: f32 = randf01(&mut rng_state);
+                    let rand_y: f32 = randf01(&mut rng_state);
+                    let film_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
+                    let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                    let film_p = cam.film_lower_left + film_x + film_y;
 
-                // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                // then add a random [0,1) float
-                let ray_p = cam.origin;
-                let ray_dir = (film_p - cam.origin).normalize();
-                color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                    // then add a random [0,1) float
+                    let ray_p = cam.origin;
+                    let ray_dir = (film_p - cam.origin).normalize();
+                    color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                }
+
+                color *= inv_rays_per_pixels;
+
+                // write in rgb order
+                let pixel_index = image_x * pixel_width;
+                chunk[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
+                chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
+                chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
             }
-
-            color *= inv_rays_per_pixels;
-
-            // write in rgb order
-            let pixel_index = image_x * pixel_width;
-            chunk[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
-            chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
-            chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
-        }
-    }
+        });
     println!("computation took {}ms", start.elapsed().as_millis());
 
     let start = Instant::now();
