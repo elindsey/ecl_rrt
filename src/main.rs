@@ -326,7 +326,6 @@ fn main() {
     let rays_per_pixel = 1000;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
-    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
     let cam = Camera::new(
         V3(0.0, -10.0, 1.0),
         V3(0.0, 0.0, 0.0),
@@ -336,6 +335,7 @@ fn main() {
     let start = Instant::now();
     let inv_height = 1.0 / (height as f32 - 1.0);
     let inv_width = 1.0 / (width as f32 - 1.0);
+    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
     pixels
         .par_chunks_mut(width * pixel_width)
         .enumerate()
