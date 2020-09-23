@@ -150,7 +150,7 @@ struct Material {
 
 struct Sphere {
     p: V3,
-    r: f32,
+    rsqrd: f32,
     inv_r: f32,
     m: Material,
 }
@@ -159,7 +159,7 @@ impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
         Sphere {
             p,
-            r,
+            rsqrd: r * r,
             inv_r: 1.0 / r,
             m,
         }
@@ -199,23 +199,15 @@ fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
     min + (max - min) * randf01(state)
 }
 
-fn cast(
-    bg: &Material,
-    spheres: &Vec<Sphere>,
-    origin: V3,
-    dir: V3,
-    bounces: u32,
-    rng_state: &mut u32,
-) -> V3 {
-    //assert!(dir.is_unit_vector());
+fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &Sphere)> {
     let mut hit_dist = f32::MAX;
     let mut hit_sphere: Option<&Sphere> = None;
-    let tolerance = 0.0001;
+    let tolerance = 0.0001; // I can't remember why I have this
 
     for s in spheres {
         let sphere_relative_origin = origin - s.p;
         let b = dir.dot(sphere_relative_origin);
-        let c = sphere_relative_origin.dot(sphere_relative_origin) - s.r * s.r;
+        let c = sphere_relative_origin.dot(sphere_relative_origin) - s.rsqrd;
         let discr = b * b - c;
 
         if discr > 0.0 {
@@ -246,18 +238,38 @@ fn cast(
         }
     }
 
-    match hit_sphere {
-        Some(s) => {
+    if let Some(s) = hit_sphere {
+        let hit_p = origin + dir * hit_dist;
+        Some((hit_p, s))
+    } else {
+        None
+    }
+}
+
+fn cast(
+    bg: &Material,
+    spheres: &Vec<Sphere>,
+    origin: V3,
+    dir: V3,
+    bounces: u32,
+    rng_state: &mut u32,
+) -> V3 {
+    //assert!(dir.is_unit_vector());
+    let hit = intersect_world(spheres, origin, dir);
+    match hit {
+        Some((hit_p, s)) => {
             let hit_material = &s.m;
-            let hit_p = origin + dir * hit_dist;
-            // normalize with mulf by 1/s->r, b/c length of that vector is the radius
-            let hit_normal = (hit_p - s.p) * s.inv_r;
             if bounces > 0 {
                 let new_dir = match hit_material.t {
-                    MaterialType::Specular => dir.reflect(hit_normal),
+                    MaterialType::Specular => {
+                        // normalize with mulf by 1/s->r, b/c length of that vector is the radius
+                        let hit_normal = (hit_p - s.p) * s.inv_r;
+                        dir.reflect(hit_normal)
+                    }
                     MaterialType::Diffuse => {
                         let a = randf_range(rng_state, 0.0, 2.0 * PI);
-                        let z = randf_range(rng_state, -1.0, 1.0f32); // technically should be [-1, 1], but close enough
+                        // technically should be [-1, 1], but close enough
+                        let z = randf_range(rng_state, -1.0, 1.0f32);
                         let r = (1.0 - z * z).sqrt();
                         V3(r * a.cos(), r * a.sin(), z)
                     }
