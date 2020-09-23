@@ -336,7 +336,9 @@ fn main() {
     let inv_height = 1.0 / (height as f32 - 1.0);
     let inv_width = 1.0 / (width as f32 - 1.0);
     let mut rng_state = rand::thread_rng().next_u32();
-    for image_y in 0..height {
+    let pixel_chunks = pixels.chunks_mut(width * pixel_width);
+    for (i, chunk) in pixel_chunks.into_iter().enumerate() {
+        let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
         for image_x in 0..width {
             let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
@@ -358,10 +360,10 @@ fn main() {
             color *= inv_rays_per_pixels;
 
             // write in rgb order
-            let pixel_index = (height - image_y - 1) * width * pixel_width + image_x * pixel_width;
-            pixels[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
-            pixels[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
-            pixels[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
+            let pixel_index = image_x * pixel_width;
+            chunk[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
+            chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
+            chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
         }
     }
     println!("computation took {}ms", start.elapsed().as_millis());
