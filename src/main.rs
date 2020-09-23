@@ -361,12 +361,11 @@ fn main() {
 
             color *= inv_rays_per_pixels;
 
-            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 0] =
-                (255.0 * linear_to_srgb(color.0)) as u8;
-            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 1] =
-                (255.0 * linear_to_srgb(color.1)) as u8;
-            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 2] =
-                (255.0 * linear_to_srgb(color.2)) as u8;
+            // write in rgb order
+            let pixel_index = (height - image_y - 1) * width * pixel_width + image_x * pixel_width;
+            pixels[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
+            pixels[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
+            pixels[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
         }
         //println!("height {}", image_y);
     }
