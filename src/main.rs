@@ -1,7 +1,7 @@
 use rand::prelude::*;
 use std::{
     f32::consts::PI,
-    ops::{Add, AddAssign, Mul, Sub},
+    ops::{Add, AddAssign, Mul, MulAssign, Sub},
     time::Instant,
 };
 
@@ -50,8 +50,8 @@ impl Add for V3 {
 impl Add<f32> for V3 {
     type Output = Self;
 
-    fn add(self, other: f32) -> Self {
-        Self(self.0 + other, self.1 + other, self.2 + other)
+    fn add(self, rhs: f32) -> Self {
+        Self(self.0 + rhs, self.1 + rhs, self.2 + rhs)
     }
 }
 
@@ -72,8 +72,8 @@ impl Sub for V3 {
 impl Sub<f32> for V3 {
     type Output = Self;
 
-    fn sub(self, other: f32) -> Self {
-        Self(self.0 - other, self.1 - other, self.2 - other)
+    fn sub(self, rhs: f32) -> Self {
+        Self(self.0 - rhs, self.1 - rhs, self.2 - rhs)
     }
 }
 
@@ -88,8 +88,14 @@ impl Mul for V3 {
 impl Mul<f32> for V3 {
     type Output = Self;
 
-    fn mul(self, other: f32) -> Self {
-        Self(self.0 * other, self.1 * other, self.2 * other)
+    fn mul(self, rhs: f32) -> Self {
+        Self(self.0 * rhs, self.1 * rhs, self.2 * rhs)
+    }
+}
+
+impl MulAssign<f32> for V3 {
+    fn mul_assign(&mut self, rhs: f32) {
+        *self = Self(self.0 * rhs, self.1 * rhs, self.2 * rhs)
     }
 }
 
@@ -299,13 +305,14 @@ fn main() {
         t: MaterialType::Specular,
     };
 
-    let mut spheres = Vec::new();
-    spheres.push(Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground));
-    spheres.push(Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center));
-    spheres.push(Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
-    spheres.push(Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
-    spheres.push(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left));
-    spheres.push(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right));
+    let spheres = vec![
+        Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground),
+        Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center),
+        Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left),
+        Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right),
+    ];
 
     let width = 1920;
     let height = 1080;
@@ -345,12 +352,14 @@ fn main() {
                 color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
             }
 
+            color *= inv_rays_per_pixels;
+
             pixels[image_y * width * pixel_width + image_x * pixel_width + 0] =
-                (255.0 * linear_to_srgb(color.0 * inv_rays_per_pixels as f32)) as u8;
+                (255.0 * linear_to_srgb(color.0)) as u8;
             pixels[image_y * width * pixel_width + image_x * pixel_width + 1] =
-                (255.0 * linear_to_srgb(color.1 * inv_rays_per_pixels as f32)) as u8;
+                (255.0 * linear_to_srgb(color.1)) as u8;
             pixels[image_y * width * pixel_width + image_x * pixel_width + 2] =
-                (255.0 * linear_to_srgb(color.2 * inv_rays_per_pixels as f32)) as u8;
+                (255.0 * linear_to_srgb(color.2)) as u8;
         }
         //println!("height {}", image_y);
     }
