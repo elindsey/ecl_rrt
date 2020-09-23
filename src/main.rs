@@ -33,7 +33,7 @@ impl V3 {
         self.dot(self).sqrt()
     }
 
-    fn is_unit_vector(self) -> bool {
+    fn _is_unit_vector(self) -> bool {
         // TODO epsilon might be too small?
         (self.dot(self) - 1.0).abs() < f32::EPSILON
     }
@@ -105,9 +105,9 @@ struct Camera {
     x: V3,
     y: V3,
     z: V3,
-    viewport_lower_left: V3,
-    viewport_width: f32,
-    viewport_height: f32,
+    film_lower_left: V3,
+    film_width: f32,
+    film_height: f32,
 }
 
 impl Camera {
@@ -119,18 +119,18 @@ impl Camera {
         let x = V3(0.0, 0.0, 1.0).cross(z).normalize();
         let y = z.cross(x).normalize();
 
-        let viewport_height = 1.0;
-        let viewport_width = viewport_height * aspect_ratio;
-        let viewport_lower_left = origin - z - y * 0.5 * viewport_height - x * 0.5 * viewport_width;
+        let film_height = 1.0;
+        let film_width = film_height * aspect_ratio;
+        let film_lower_left = origin - z - y * 0.5 * film_height - x * 0.5 * film_width;
 
         Camera {
             origin,
             x,
             y,
             z,
-            viewport_lower_left,
-            viewport_width,
-            viewport_height,
+            film_lower_left,
+            film_width,
+            film_height,
         }
     }
 }
@@ -346,10 +346,9 @@ fn main() {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
                 let rand_x: f32 = randf01(&mut rng_state);
                 let rand_y: f32 = randf01(&mut rng_state);
-                let viewport_y =
-                    cam.y * cam.viewport_height * (image_y as f32 + rand_y) * inv_height;
-                let viewport_x = cam.x * cam.viewport_width * (image_x as f32 + rand_x) * inv_width;
-                let viewport_p = cam.viewport_lower_left + viewport_x + viewport_y;
+                let viewport_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
+                let viewport_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                let viewport_p = cam.film_lower_left + viewport_x + viewport_y;
 
                 // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
                 // to do this we take the start of that range (what we calculated as the image projecting onto our viewport),
@@ -379,7 +378,7 @@ fn main() {
         height as u32,
         image::ColorType::Rgb8,
     )
-    .unwrap();
+    .expect("failed to write image to disk");
     println!("writing file took {}ms", start.elapsed().as_millis());
 
     println!("Fin.");
