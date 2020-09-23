@@ -325,7 +325,7 @@ fn main() {
 
     let width = 1920;
     let height = 1080;
-    let rays_per_pixel = 100;
+    let rays_per_pixel = 50;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
     let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
@@ -335,14 +335,12 @@ fn main() {
         width as f32 / height as f32,
     );
 
-    // TODO: test this as an iteration over pixels, may elide bounds checking
     let start = Instant::now();
     let inv_height = 1.0 / (height as f32 - 1.0);
     let inv_width = 1.0 / (width as f32 - 1.0);
     let mut rng_state = rand::thread_rng().next_u32();
     for image_y in 0..height {
         for image_x in 0..width {
-
             let mut color = V3(0.0, 0.0, 0.0);
             for _ in 0..rays_per_pixel {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the viewport
@@ -363,18 +361,17 @@ fn main() {
 
             color *= inv_rays_per_pixels;
 
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] =
+            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 0] =
                 (255.0 * linear_to_srgb(color.0)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] =
+            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 1] =
                 (255.0 * linear_to_srgb(color.1)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] =
+            pixels[(height - image_y - 1) * width * pixel_width + image_x * pixel_width + 2] =
                 (255.0 * linear_to_srgb(color.2)) as u8;
         }
         //println!("height {}", image_y);
     }
     println!("computation took {}ms", start.elapsed().as_millis());
 
-    // TODO: bug, image is upside down
     let start = Instant::now();
     image::save_buffer(
         "out.png",
