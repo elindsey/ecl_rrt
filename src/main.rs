@@ -202,7 +202,7 @@ fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
 fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &Sphere)> {
     let mut hit_dist = f32::MAX;
     let mut hit_sphere: Option<&Sphere> = None;
-    let tolerance = 0.0001; // I can't remember why I have this
+    let tolerance = 0.0001;
 
     for s in spheres {
         let sphere_relative_origin = origin - s.p;
@@ -210,30 +210,28 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &S
         let c = sphere_relative_origin.dot(sphere_relative_origin) - s.rsqrd;
         let discr = b * b - c;
 
+        // at least one real root, meaning we've hit the sphere
         if discr > 0.0 {
-            // at least one real root, meaning we've hit the sphere
             let root_term = discr.sqrt();
-            if root_term > tolerance {
-                // Order here matters. root_term is positive; b may be positive or negative
-                //
-                // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
-                // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
-                // must be first.
-                //
-                // Second case is less interesting
-                // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
-                let t = -b - root_term; // -b minus pos
-                if t > tolerance && t < hit_dist {
-                    hit_dist = t;
-                    hit_sphere = Some(s);
-                    continue;
-                }
-                let t = -b + root_term; // -b plus pos
-                if t > tolerance && t < hit_dist {
-                    hit_dist = t;
-                    hit_sphere = Some(s);
-                    continue;
-                }
+            // Order here matters. root_term is positive; b may be positive or negative
+            //
+            // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
+            // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
+            // must be first.
+            //
+            // Second case is less interesting
+            // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
+            let t = -b - root_term; // -b minus pos
+            if t > tolerance && t < hit_dist {
+                hit_dist = t;
+                hit_sphere = Some(s);
+                continue;
+            }
+            let t = -b + root_term; // -b plus pos
+            if t > tolerance && t < hit_dist {
+                hit_dist = t;
+                hit_sphere = Some(s);
+                continue;
             }
         }
     }
@@ -366,7 +364,6 @@ fn main() {
             pixels[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
             pixels[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
         }
-        //println!("height {}", image_y);
     }
     println!("computation took {}ms", start.elapsed().as_millis());
 
