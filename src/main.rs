@@ -313,9 +313,9 @@ fn main() {
                 color += cast(&bg, &spheres, ray_p, ray_dir, 8);
             }
 
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
-            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 0] = (255.0 * linear_to_srgb(color.0/rays_per_pixel as f32)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 1] = (255.0 * linear_to_srgb(color.1/rays_per_pixel as f32)) as u8;
+            pixels[image_y * width * pixel_width + image_x * pixel_width + 2] = (255.0 * linear_to_srgb(color.2/rays_per_pixel as f32)) as u8;
         }
         println!("height {}", image_y);
     }
