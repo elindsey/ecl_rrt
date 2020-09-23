@@ -342,34 +342,36 @@ fn main() {
         .for_each_init(
             || rand::thread_rng().next_u32(),
             |rng_state, (i, chunk)| {
-            let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
-            for image_x in 0..width {
-                let mut color = V3(0.0, 0.0, 0.0);
-                for _ in 0..rays_per_pixel {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x: f32 = randf01(rng_state);
-                    let rand_y: f32 = randf01(rng_state);
-                    let film_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
-                    let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+                let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
+                for image_x in 0..width {
+                    let mut color = V3(0.0, 0.0, 0.0);
+                    for _ in 0..rays_per_pixel {
+                        // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                        let rand_x: f32 = randf01(rng_state);
+                        let rand_y: f32 = randf01(rng_state);
+                        let film_y =
+                            cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
+                        let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                        let film_p = cam.film_lower_left + film_x + film_y;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    color += cast(&bg, &spheres, ray_p, ray_dir, 8, rng_state);
+                        // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                        // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                        // then add a random [0,1) float
+                        let ray_p = cam.origin;
+                        let ray_dir = (film_p - cam.origin).normalize();
+                        color += cast(&bg, &spheres, ray_p, ray_dir, 8, rng_state);
+                    }
+
+                    color *= inv_rays_per_pixels;
+
+                    // write in rgb order
+                    let pixel_index = image_x * pixel_width;
+                    chunk[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
+                    chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
+                    chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
                 }
-
-                color *= inv_rays_per_pixels;
-
-                // write in rgb order
-                let pixel_index = image_x * pixel_width;
-                chunk[pixel_index + 0] = (255.0 * linear_to_srgb(color.0)) as u8;
-                chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
-                chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
-            }
-        });
+            },
+        );
     println!("computation took {}ms", start.elapsed().as_millis());
 
     let start = Instant::now();
