@@ -136,6 +136,7 @@ impl Camera {
     }
 }
 
+// TODO: refactor to adt or something; some C legacy in the code structure here
 #[derive(Debug, Clone, PartialEq)]
 enum MaterialType {
     Diffuse,
