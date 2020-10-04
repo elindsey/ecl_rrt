@@ -193,7 +193,7 @@ fn xorshift(state: &mut u32) -> u32 {
 
 fn randf01(state: &mut u32) -> f32 {
     let randu = (xorshift(state) >> 9) | 0x3f800000;
-    let randf = unsafe { std::mem::transmute::<u32, f32>(randu) } - 1.0;
+    let randf = f32::from_bits(randu) - 1.0;
     randf
 }
 
