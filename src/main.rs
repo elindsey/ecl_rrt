@@ -182,22 +182,22 @@ fn linear_to_srgb(x: f32) -> f32 {
 }
 
 // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
-fn xorshift(state: &Cell<u32>) -> u32 {
-    let mut x = state.get();
+fn xorshift(state: &mut u32) -> u32 {
+    let mut x = *state;
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    state.set(x);
+    *state = x;
     x
 }
 
-fn randf01(state: &Cell<u32>) -> f32 {
+fn randf01(state: &mut u32) -> f32 {
     let randu = (xorshift(state) >> 9) | 0x3f800000;
     let randf = f32::from_bits(randu) - 1.0;
     randf
 }
 
-fn randf_range(state: &Cell<u32>, min: f32, max: f32) -> f32 {
+fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
     min + (max - min) * randf01(state)
 }
 
@@ -252,7 +252,7 @@ fn cast(
     origin: V3,
     dir: V3,
     bounces: u32,
-    rng_state: &Cell<u32>,
+    rng_state: &mut u32,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
     let hit = intersect_world(spheres, origin, dir);
@@ -324,7 +324,7 @@ fn main() {
 
     let width = 1920;
     let height = 1080;
-    let rays_per_pixel = 100;
+    let rays_per_pixel = 1000;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let pixel_width = 3;
     let cam = Camera::new(
@@ -348,14 +348,15 @@ fn main() {
                 Cell::new(u32::from_le_bytes(buf))
             }}
 
-            RNG.with(|rng_state| {
+            RNG.with(|rng_cell| {
+                let mut rng_state = rng_cell.get();
                 let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
                 for image_x in 0..width {
                     let mut color = V3(0.0, 0.0, 0.0);
                     for _ in 0..rays_per_pixel {
                         // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                        let rand_x: f32 = randf01(rng_state);
-                        let rand_y: f32 = randf01(rng_state);
+                        let rand_x: f32 = randf01(&mut rng_state);
+                        let rand_y: f32 = randf01(&mut rng_state);
                         let film_y =
                             cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
                         let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
@@ -366,7 +367,7 @@ fn main() {
                         // then add a random [0,1) float
                         let ray_p = cam.origin;
                         let ray_dir = (film_p - cam.origin).normalize();
-                        color += cast(&bg, &spheres, ray_p, ray_dir, 8, rng_state);
+                        color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
                     }
 
                     color *= inv_rays_per_pixels;
@@ -377,6 +378,7 @@ fn main() {
                     chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
                     chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
                 }
+                rng_cell.set(rng_state);
             });
         });
     println!("computation took {}ms", start.elapsed().as_millis());
