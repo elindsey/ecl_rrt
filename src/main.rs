@@ -157,6 +157,7 @@ struct Sphere {
     m: Material,
 }
 
+// TODO add obj-rs support
 impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
         Sphere {
@@ -285,6 +286,14 @@ fn cast(
     }
 }
 
+thread_local! {
+    static RNG: Cell<u32> = {
+        let mut buf = [0u8; 4];
+        getrandom::getrandom(&mut buf).unwrap();
+        Cell::new(u32::from_le_bytes(buf))
+    };
+}
+
 fn main() {
     // Materials
     let bg = Material {
@@ -339,13 +348,6 @@ fn main() {
     img.enumerate_pixels_mut()
         .par_bridge()
         .for_each(|(image_x, image_y, pixel)| {
-            thread_local! {
-            static RNG: Cell<u32> = {
-                let mut buf = [0u8; 4];
-                getrandom::getrandom(&mut buf).unwrap();
-                Cell::new(u32::from_le_bytes(buf))
-            }}
-
             RNG.with(|rng_cell| {
                 let mut rng_state = rng_cell.get();
                 let image_x = image_x as f32;
