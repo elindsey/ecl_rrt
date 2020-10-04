@@ -1,6 +1,6 @@
-use rand::prelude::*;
 use rayon::prelude::*;
 use std::{
+    cell::Cell,
     f32::consts::PI,
     ops::{Add, AddAssign, Mul, MulAssign, Sub},
     time::Instant,
@@ -182,22 +182,22 @@ fn linear_to_srgb(x: f32) -> f32 {
 }
 
 // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
-fn xorshift(state: &mut u32) -> u32 {
-    let mut x = *state;
+fn xorshift(state: &Cell<u32>) -> u32 {
+    let mut x = state.get();
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    *state = x;
+    state.set(x);
     x
 }
 
-fn randf01(state: &mut u32) -> f32 {
+fn randf01(state: &Cell<u32>) -> f32 {
     let randu = (xorshift(state) >> 9) | 0x3f800000;
     let randf = f32::from_bits(randu) - 1.0;
     randf
 }
 
-fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
+fn randf_range(state: &Cell<u32>, min: f32, max: f32) -> f32 {
     min + (max - min) * randf01(state)
 }
 
@@ -252,7 +252,7 @@ fn cast(
     origin: V3,
     dir: V3,
     bounces: u32,
-    rng_state: &mut u32,
+    rng_state: &Cell<u32>,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
     let hit = intersect_world(spheres, origin, dir);
@@ -340,9 +340,15 @@ fn main() {
     pixels
         .par_chunks_mut(width * pixel_width)
         .enumerate()
-        .for_each_init(
-            || rand::thread_rng().next_u32(),
-            |rng_state, (i, chunk)| {
+        .for_each(|(i, chunk)| {
+            thread_local! {
+            static RNG: Cell<u32> = {
+                let mut buf = [0u8; 4];
+                getrandom::getrandom(&mut buf).unwrap();
+                Cell::new(u32::from_le_bytes(buf))
+            }}
+
+            RNG.with(|rng_state| {
                 let image_y = height - i - 1; // necessary to get pixels in the proper order for a right-side-up image
                 for image_x in 0..width {
                     let mut color = V3(0.0, 0.0, 0.0);
@@ -371,8 +377,8 @@ fn main() {
                     chunk[pixel_index + 1] = (255.0 * linear_to_srgb(color.1)) as u8;
                     chunk[pixel_index + 2] = (255.0 * linear_to_srgb(color.2)) as u8;
                 }
-            },
-        );
+            });
+        });
     println!("computation took {}ms", start.elapsed().as_millis());
 
     let start = Instant::now();
