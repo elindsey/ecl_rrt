@@ -387,7 +387,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
 
-    println!("Computation took {}ms", start.elapsed().as_millis());
+    println!("Computation took {:.3}s", start.elapsed().as_secs_f32());
     println!("Writing to {}", filename);
     img.save(filename)?;
     Ok(())
