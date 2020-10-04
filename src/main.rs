@@ -324,6 +324,8 @@ fn main() {
 
     let width = 1920;
     let height = 1080;
+    let inv_width = 1.0 / (width as f32 - 1.0);
+    let inv_height = 1.0 / (height as f32 - 1.0);
     let rays_per_pixel = 1000;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let cam = Camera::new(
@@ -333,8 +335,6 @@ fn main() {
     );
 
     let start = Instant::now();
-    let inv_height = 1.0 / (height as f32 - 1.0);
-    let inv_width = 1.0 / (width as f32 - 1.0);
     let mut img = image::ImageBuffer::new(width, height);
     img.enumerate_pixels_mut()
         .par_bridge()
@@ -348,14 +348,15 @@ fn main() {
 
             RNG.with(|rng_cell| {
                 let mut rng_state = rng_cell.get();
-                let image_y = height - image_y - 1; // necessary to get pixels in the proper order for a right-side-up image
+                let image_x = image_x as f32;
+                let image_y = (height - image_y - 1) as f32; // flip image right-side-up
                 let mut color = V3(0.0, 0.0, 0.0);
                 for _ in 0..rays_per_pixel {
                     // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x: f32 = randf01(&mut rng_state);
-                    let rand_y: f32 = randf01(&mut rng_state);
-                    let film_y = cam.y * cam.film_height * (image_y as f32 + rand_y) * inv_height;
-                    let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                    let rand_x = randf01(&mut rng_state);
+                    let rand_y = randf01(&mut rng_state);
+                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
                     let film_p = cam.film_lower_left + film_x + film_y;
 
                     // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
