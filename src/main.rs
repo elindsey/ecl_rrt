@@ -386,10 +386,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rng_cell.set(rng_state);
             });
         });
-    println!("computation took {}ms", start.elapsed().as_millis());
 
+    println!("Computation took {}ms", start.elapsed().as_millis());
+    println!("Writing to {}", filename);
     img.save(filename)?;
-
-    println!("Fin.");
     Ok(())
 }
