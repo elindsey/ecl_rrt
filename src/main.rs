@@ -1,3 +1,4 @@
+use pico_args::Arguments;
 use rayon::prelude::*;
 use std::{
     cell::Cell,
@@ -294,7 +295,14 @@ thread_local! {
     };
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = Arguments::from_env();
+    let rays_per_pixel = args.opt_value_from_str("-r")?.unwrap_or(100);
+    let filename = args
+        .opt_value_from_str("-o")?
+        .unwrap_or("out.png".to_string());
+    args.finish()?;
+
     // Materials
     let bg = Material {
         emit_color: V3(0.3, 0.4, 0.8),
@@ -335,7 +343,6 @@ fn main() {
     let height = 1080;
     let inv_width = 1.0 / (width as f32 - 1.0);
     let inv_height = 1.0 / (height as f32 - 1.0);
-    let rays_per_pixel = 1000;
     let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
     let cam = Camera::new(
         V3(0.0, -10.0, 1.0),
@@ -381,7 +388,8 @@ fn main() {
         });
     println!("computation took {}ms", start.elapsed().as_millis());
 
-    img.save("asdf.png").expect("failed to write image to disk");
+    img.save(filename)?;
 
     println!("Fin.");
+    Ok(())
 }
