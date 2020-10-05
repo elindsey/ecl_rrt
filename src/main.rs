@@ -190,6 +190,7 @@ fn linear_to_srgb(x: f32) -> f32 {
 
 // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
 fn xorshift(state: &mut u32) -> u32 {
+    debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
     let mut x = *state;
     x ^= x << 13;
     x ^= x >> 17;
