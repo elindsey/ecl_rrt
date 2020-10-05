@@ -1,5 +1,5 @@
 use pico_args::Arguments;
-use rayon::prelude::*;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::{
     cell::Cell,
     f32::consts::PI,
