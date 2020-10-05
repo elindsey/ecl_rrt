@@ -101,6 +101,12 @@ impl MulAssign<f32> for V3 {
     }
 }
 
+impl MulAssign for V3 {
+    fn mul_assign(&mut self, other: Self) {
+        *self = Self(self.0 * other.0, self.1 * other.1, self.2 * other.2)
+    }
+}
+
 #[derive(Debug)]
 struct Camera {
     origin: V3,
@@ -202,9 +208,9 @@ fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
     min + (max - min) * randf01(state)
 }
 
-fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &Sphere)> {
+fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
+    let mut hit: Option<(f32, &Sphere)> = None;
     let mut hit_dist = f32::MAX;
-    let mut hit_sphere: Option<&Sphere> = None;
     let tolerance = 0.0001;
 
     for s in spheres {
@@ -227,24 +233,18 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(V3, &S
             let t = -b - root_term; // -b minus positive
             if t > tolerance && t < hit_dist {
                 hit_dist = t;
-                hit_sphere = Some(s);
+                hit = Some((hit_dist, s));
                 continue;
             }
             let t = -b + root_term; // -b plus positive
             if t > tolerance && t < hit_dist {
                 hit_dist = t;
-                hit_sphere = Some(s);
+                hit = Some((hit_dist, s));
                 continue;
             }
         }
     }
-
-    if let Some(s) = hit_sphere {
-        let hit_p = origin + dir * hit_dist;
-        Some((hit_p, s))
-    } else {
-        None
-    }
+    hit
 }
 
 fn cast(
@@ -252,7 +252,7 @@ fn cast(
     spheres: &Vec<Sphere>,
     origin: V3,
     dir: V3,
-    bounces: u32,
+    max_bounces: u32,
     rng_state: &mut u32,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
@@ -260,16 +260,29 @@ fn cast(
     let mut reflectance = V3(1.0, 1.0, 1.0);
     let mut origin = origin;
     let mut dir = dir;
+    let mut bounce = 0;
 
-    for _ in 0..(bounces + 1) {
+    loop {
         let hit = intersect_world(spheres, origin, dir);
-        match hit {
-            Some((hit_p, s)) => {
-                let hit_m = &s.m;
-                let new_dir = match hit_m.t {
+        match (hit, bounce) {
+            (None, _) => {
+                color += reflectance * bg.emit_color;
+                break;
+            }
+            (Some((_, s)), b) if b == max_bounces => {
+                color += reflectance * s.m.emit_color;
+                break;
+            }
+            (Some((hit_dist, s)), _) => {
+                bounce += 1;
+                color += reflectance * s.m.emit_color;
+                reflectance *= s.m.reflect_color;
+                let hit_point = origin + dir * hit_dist;
+                origin = hit_point;
+                dir = match s.m.t {
                     MaterialType::Specular => {
                         // normalize with mulf by 1/s->r, b/c length of that vector is the radius
-                        let hit_normal = (hit_p - s.p) * s.inv_r;
+                        let hit_normal = (hit_point - s.p) * s.inv_r;
                         dir.reflect(hit_normal)
                     }
                     MaterialType::Diffuse => {
@@ -280,21 +293,6 @@ fn cast(
                         V3(r * a.cos(), r * a.sin(), z)
                     }
                 };
-                origin = hit_p;
-                dir = new_dir;
-
-                // to make this iterative:
-                // 1.emit + 1.reflect * (2.emit + 2.reflect * (3.emit))
-                // 1.emit + 1.reflect * 2.emit + 1.reflect * 2.reflect * 3.emit
-                // let sum_emit = (0, 0, 0); let sum_reflect = (1.0, 1.0, 1.0)
-                //let bounced_color = cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state);
-                //hit_m.emit_color + hit_m.reflect_color * bounced_color
-                color += reflectance * hit_m.emit_color;
-                reflectance = reflectance * hit_m.reflect_color;
-            }
-            None => {
-                color += reflectance * bg.emit_color;
-                break;
             }
         }
     }
