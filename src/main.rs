@@ -209,7 +209,7 @@ fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
 }
 
 fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
-    let mut hit: Option<(f32, &Sphere)> = None;
+    let mut hit = None;
     let mut hit_dist = f32::MAX;
     let tolerance = 0.0001;
 
@@ -250,31 +250,28 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &
 fn cast(
     bg: &Material,
     spheres: &Vec<Sphere>,
-    origin: V3,
-    dir: V3,
-    max_bounces: u32,
+    mut origin: V3,
+    mut dir: V3,
+    mut bounces: u32,
     rng_state: &mut u32,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
-    let mut origin = origin;
-    let mut dir = dir;
-    let mut bounce = 0;
 
     loop {
         let hit = intersect_world(spheres, origin, dir);
-        match (hit, bounce) {
+        match (hit, bounces) {
             (None, _) => {
                 color += reflectance * bg.emit_color;
                 break;
             }
-            (Some((_, s)), b) if b == max_bounces => {
+            (Some((_, s)), 0) => {
                 color += reflectance * s.m.emit_color;
                 break;
             }
             (Some((hit_dist, s)), _) => {
-                bounce += 1;
+                bounces -= 1;
                 color += reflectance * s.m.emit_color;
                 reflectance *= s.m.reflect_color;
                 let hit_point = origin + dir * hit_dist;
