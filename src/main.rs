@@ -276,6 +276,10 @@ fn cast(
                     }
                 };
 
+                // to make this iterative:
+                // 1.emit + 1.reflect * (2.emit + 2.reflect * (3.emit))
+                // 1.emit + 1.reflect * 2.emit + 1.reflect * 2.reflect * 3.emit
+                // let sum_emit = (0, 0, 0); let sum_reflect = (1.0, 1.0, 1.0)
                 let bounced_color = cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state);
                 hit_m.emit_color + hit_m.reflect_color * bounced_color
             } else {
