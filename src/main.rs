@@ -1,9 +1,11 @@
 use pico_args::Arguments;
-use rayon::iter::{ParallelBridge, ParallelIterator};
-use std::cell::Cell;
-use std::f32::consts::PI;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub};
-use std::time::Instant;
+use rayon::prelude::*;
+use std::{
+    cell::Cell,
+    f32::consts::PI,
+    ops::{Add, AddAssign, Mul, MulAssign, Sub},
+    time::Instant,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct V3(f32, f32, f32);
