@@ -256,11 +256,16 @@ fn cast(
     rng_state: &mut u32,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
-    let hit = intersect_world(spheres, origin, dir);
-    match hit {
-        Some((hit_p, s)) => {
-            let hit_m = &s.m;
-            if bounces > 0 {
+    let mut color = V3(0.0, 0.0, 0.0);
+    let mut reflectance = V3(1.0, 1.0, 1.0);
+    let mut origin = origin;
+    let mut dir = dir;
+
+    for _ in 0..(bounces + 1) {
+        let hit = intersect_world(spheres, origin, dir);
+        match hit {
+            Some((hit_p, s)) => {
+                let hit_m = &s.m;
                 let new_dir = match hit_m.t {
                     MaterialType::Specular => {
                         // normalize with mulf by 1/s->r, b/c length of that vector is the radius
@@ -275,19 +280,25 @@ fn cast(
                         V3(r * a.cos(), r * a.sin(), z)
                     }
                 };
+                origin = hit_p;
+                dir = new_dir;
 
                 // to make this iterative:
                 // 1.emit + 1.reflect * (2.emit + 2.reflect * (3.emit))
                 // 1.emit + 1.reflect * 2.emit + 1.reflect * 2.reflect * 3.emit
                 // let sum_emit = (0, 0, 0); let sum_reflect = (1.0, 1.0, 1.0)
-                let bounced_color = cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state);
-                hit_m.emit_color + hit_m.reflect_color * bounced_color
-            } else {
-                hit_m.emit_color
+                //let bounced_color = cast(bg, spheres, hit_p, new_dir, bounces - 1, rng_state);
+                //hit_m.emit_color + hit_m.reflect_color * bounced_color
+                color += reflectance * hit_m.emit_color;
+                reflectance = reflectance * hit_m.reflect_color;
+            }
+            None => {
+                color += reflectance * bg.emit_color;
+                break;
             }
         }
-        None => bg.emit_color,
     }
+    color
 }
 
 thread_local! {
