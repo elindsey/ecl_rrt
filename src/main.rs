@@ -270,7 +270,7 @@ fn cast(
                     MaterialType::Diffuse => {
                         let a = randf_range(rng_state, 0.0, 2.0 * PI);
                         // technically should be [-1, 1], but close enough
-                        let z = randf_range(rng_state, -1.0, 1.0f32);
+                        let z = randf_range(rng_state, -1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
                         V3(r * a.cos(), r * a.sin(), z)
                     }
@@ -363,8 +363,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // calculate ratio we've moved along the image (y/height), step proportionally within the film
                     let rand_x = randf01(&mut rng_state);
                     let rand_y = randf01(&mut rng_state);
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
                     let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
                     let film_p = cam.film_lower_left + film_x + film_y;
 
                     // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
@@ -388,6 +388,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Computation took {:.3}s", start.elapsed().as_secs_f32());
     println!("Writing to {}", filename);
-    img.save(filename)?;
-    Ok(())
+    img.save(filename).map_err(Into::into)
 }
