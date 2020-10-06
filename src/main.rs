@@ -188,35 +188,11 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
+// pcg xsh rs 64/32 (mcg)
 fn pcg(state: &mut u64) -> u32 {
-    let oldstate = *state;
-    *state = oldstate
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407); // this add should be picked better
-    let xorshifted = (((oldstate >> 18) ^ oldstate) >> 27) as u32;
-    let rot = (oldstate >> 59) as u32;
-    xorshifted.rotate_right(rot)
-}
-
-// Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
-fn xorshift(state: &mut u32) -> u32 {
-    debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
-    let mut x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    x
-}
-
-fn xorshifts(state: &mut u64) -> u32 {
-    debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
-    let mut x = *state;
-    x ^= x >> 12;
-    x ^= x << 25;
-    x ^= x >> 27;
-    *state = x;
-    (x.wrapping_mul(0x2545F4914F6CDD1D) >> 32) as u32
+    let s = *state;
+    *state = s.wrapping_mul(6364136223846793005);
+    (((s >> 22) ^ s) >> ((s >> 61) + 22)) as u32
 }
 
 fn randf01(state: &mut u64) -> f32 {
