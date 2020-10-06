@@ -188,6 +188,16 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
+fn pcg(state: &mut u64) -> u32 {
+    let oldstate = *state;
+    *state = oldstate
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407); // this add should be picked better
+    let xorshifted = (((oldstate >> 18) ^ oldstate) >> 27) as u32;
+    let rot = (oldstate >> 59) as u32;
+    xorshifted.rotate_right(rot)
+}
+
 // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
 fn xorshift(state: &mut u32) -> u32 {
     debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
@@ -199,14 +209,23 @@ fn xorshift(state: &mut u32) -> u32 {
     x
 }
 
-// [0, 1)
-fn randf01(state: &mut u32) -> f32 {
-    let randu = (xorshift(state) >> 9) | 0x3f800000;
+fn xorshifts(state: &mut u64) -> u32 {
+    debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
+    let mut x = *state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *state = x;
+    (x.wrapping_mul(0x2545F4914F6CDD1D) >> 32) as u32
+}
+
+fn randf01(state: &mut u64) -> f32 {
+    let randu = (pcg(state) >> 9) | 0x3f800000;
     let randf = f32::from_bits(randu) - 1.0;
     randf
 }
 
-fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
+fn randf_range(state: &mut u64, min: f32, max: f32) -> f32 {
     min + (max - min) * randf01(state)
 }
 
@@ -255,7 +274,7 @@ fn cast(
     mut origin: V3,
     mut dir: V3,
     mut bounces: u32,
-    rng_state: &mut u32,
+    rng_state: &mut u64,
 ) -> V3 {
     //assert!(dir.is_unit_vector());
     let mut color = V3(0.0, 0.0, 0.0);
@@ -299,10 +318,10 @@ fn cast(
 }
 
 thread_local! {
-    static RNG: Cell<u32> = {
-        let mut buf = [0u8; 4];
+    static RNG: Cell<u64> = {
+        let mut buf = [0u8; 8];
         getrandom::getrandom(&mut buf).unwrap();
-        Cell::new(u32::from_le_bytes(buf))
+        Cell::new(u64::from_le_bytes(buf))
     };
 }
 
