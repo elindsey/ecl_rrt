@@ -199,6 +199,7 @@ fn xorshift(state: &mut u32) -> u32 {
     x
 }
 
+// [0, 1)
 fn randf01(state: &mut u32) -> f32 {
     let randu = (xorshift(state) >> 9) | 0x3f800000;
     let randf = f32::from_bits(randu) - 1.0;
