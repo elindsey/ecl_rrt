@@ -163,7 +163,7 @@ struct Sphere {
     m: Material,
 }
 
-// TODO add obj-rs support
+// TODO eli: add obj-rs support
 impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
         Sphere {
@@ -293,6 +293,7 @@ fn cast(
     color
 }
 
+// TODO eli: this thread local is costing me approx 2.5% of runtime
 thread_local! {
     static RNG: Cell<u64> = {
         let mut buf = [0u8; 8];
@@ -358,6 +359,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     let mut img = image::ImageBuffer::new(width, height);
+    // TODO eli: par_bridge single threaded adds ~3%; having to call bridge isn't great
+    // need to look at replacing this enumerate
     img.enumerate_pixels_mut()
         .par_bridge()
         .for_each(|(image_x, image_y, pixel)| {
