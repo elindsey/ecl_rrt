@@ -1,5 +1,8 @@
 use pico_args::Arguments;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelBridge, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use std::{
     cell::Cell,
     f32::consts::PI,
@@ -358,39 +361,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let start = Instant::now();
-    let mut img = image::ImageBuffer::new(width, height);
-    // TODO eli: par_bridge single threaded adds ~3%; having to call bridge isn't great
-    // need to look at replacing this enumerate
-    img.enumerate_pixels_mut()
-        .par_bridge()
-        .for_each(|(image_x, image_y, pixel)| {
+    let pixel_width = 3;
+    let mut pixels: Vec<u8> = vec![0; width * height * pixel_width];
+    pixels
+        .par_chunks_mut(width * pixel_width)
+        .enumerate()
+        .for_each(|(i, chunk)| {
             RNG.with(|rng_cell| {
                 let mut rng_state = rng_cell.get();
-                let image_x = image_x as f32;
-                let image_y = (height - image_y - 1) as f32; // flip image right-side-up
-                let mut color = V3(0.0, 0.0, 0.0);
-                for _ in 0..rays_per_pixel {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf01(&mut rng_state);
-                    let rand_y = randf01(&mut rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+                let image_y = (height - i - 1) as f32; // flip image right-side-up
+                for image_x in 0..width {
+                    let mut color = V3(0.0, 0.0, 0.0);
+                    for _ in 0..rays_per_pixel {
+                        // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                        let rand_x = randf01(&mut rng_state);
+                        let rand_y = randf01(&mut rng_state);
+                        let film_x = cam.x * cam.film_width * (image_x as f32 + rand_x) * inv_width;
+                        let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                        let film_p = cam.film_lower_left + film_x + film_y;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                        // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                        // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                        // then add a random [0,1) float
+                        let ray_p = cam.origin;
+                        let ray_dir = (film_p - cam.origin).normalize();
+                        color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                    }
+
+                    color *= inv_rays_per_pixels;
+
+                    let r = (255.0 * linear_to_srgb(color.0)) as u8;
+                    let g = (255.0 * linear_to_srgb(color.1)) as u8;
+                    let b = (255.0 * linear_to_srgb(color.2)) as u8;
+                    let pixel_index = image_x * pixel_width;
+                    let p = chunk.as_mut_ptr();
+                    unsafe {
+                        *p.add(pixel_index) = r;
+                        *p.add(pixel_index + 1) = g;
+                        *p.add(pixel_index + 2) = b;
+                    }
                 }
-
-                color *= inv_rays_per_pixels;
-
-                let r = (255.0 * linear_to_srgb(color.0)) as u8;
-                let g = (255.0 * linear_to_srgb(color.1)) as u8;
-                let b = (255.0 * linear_to_srgb(color.2)) as u8;
-                *pixel = image::Rgb([r, g, b]);
 
                 rng_cell.set(rng_state);
             });
@@ -398,5 +408,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Computation took {:.3}s", start.elapsed().as_secs_f32());
     println!("Writing to {}", filename);
-    img.save(filename).map_err(Into::into)
+    image::save_buffer(
+        filename,
+        &pixels,
+        width as u32,
+        height as u32,
+        image::ColorType::Rgb8,
+    )
+    .map_err(Into::into)
 }
