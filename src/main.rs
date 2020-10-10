@@ -163,7 +163,6 @@ struct Sphere {
     m: Material,
 }
 
-// TODO eli: add obj-rs support
 impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
         Sphere { p, rsqrd: r * r, m }
@@ -274,7 +273,6 @@ fn cast(
                     }
                     MaterialType::Diffuse => {
                         let a = randf_range(rng_state, 0.0, 2.0 * PI);
-                        // technically should be [-1, 1], but close enough
                         let z = randf_range(rng_state, -1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
                         V3(r * a.cos(), r * a.sin(), z)
@@ -286,7 +284,6 @@ fn cast(
     color
 }
 
-// TODO eli: this thread local is costing me approx 2.5% of runtime
 thread_local! {
     static RNG: Cell<u64> = {
         let mut buf = [0u8; 8];
@@ -352,8 +349,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     let mut img = image::ImageBuffer::new(width, height);
-    // TODO eli: par_bridge single threaded adds ~3%; having to call bridge isn't great
-    // need to look at replacing this enumerate
     img.enumerate_pixels_mut()
         .par_bridge()
         .for_each(|(image_x, image_y, pixel)| {
