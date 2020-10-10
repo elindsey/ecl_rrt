@@ -1,5 +1,5 @@
 use pico_args::Arguments;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::{
     cell::Cell,
     f32::consts::PI,
@@ -347,17 +347,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         width as f32 / height as f32,
     );
 
+    let output_every = 1;
+    let batches = rays_per_pixel / output_every;
     let start = Instant::now();
-    let mut img = image::ImageBuffer::new(width, height);
-    img.enumerate_pixels_mut()
-        .par_bridge()
-        .for_each(|(image_x, image_y, pixel)| {
+    let mut px = vec![V3(0.0, 0.0, 0.0); width * height];
+    for b in 0..batches {
+        px.par_iter_mut().enumerate().for_each(|(i, color)| {
             RNG.with(|rng_cell| {
                 let mut rng_state = rng_cell.get();
-                let image_x = image_x as f32;
-                let image_y = (height - image_y - 1) as f32; // flip image right-side-up
-                let mut color = V3(0.0, 0.0, 0.0);
-                for _ in 0..rays_per_pixel {
+                let image_x = (i % width) as f32;
+                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                for _ in 0..output_every {
                     // calculate ratio we've moved along the image (y/height), step proportionally within the film
                     let rand_x = randf01(&mut rng_state);
                     let rand_y = randf01(&mut rng_state);
@@ -370,21 +370,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // then add a random [0,1) float
                     let ray_p = cam.origin;
                     let ray_dir = (film_p - cam.origin).normalize();
-                    color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                    *color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
                 }
-
-                color *= inv_rays_per_pixels;
-
-                let r = (255.0 * linear_to_srgb(color.0)) as u8;
-                let g = (255.0 * linear_to_srgb(color.1)) as u8;
-                let b = (255.0 * linear_to_srgb(color.2)) as u8;
-                *pixel = image::Rgb([r, g, b]);
-
                 rng_cell.set(rng_state);
             });
         });
+        let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
+        for c in &px {
+            let cc = *c * (1.0 / ((b + 1) as f32 * output_every as f32));
+            buf.push((255.0 * linear_to_srgb(cc.0)) as u8);
+            buf.push((255.0 * linear_to_srgb(cc.1)) as u8);
+            buf.push((255.0 * linear_to_srgb(cc.2)) as u8);
+        }
+
+        //println!("Writing to {}", filename);
+        let f = format!("{}-{}", b, filename);
+        image::save_buffer(f, &buf, width as u32, height as u32, image::ColorType::Rgb8)?;
+    }
 
     println!("Computation took {:.3}s", start.elapsed().as_secs_f32());
-    println!("Writing to {}", filename);
-    img.save(filename).map_err(Into::into)
+    //let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
+    //for mut c in px {
+    //    c *= inv_rays_per_pixels;
+    //    buf.push((255.0 * linear_to_srgb(c.0)) as u8);
+    //    buf.push((255.0 * linear_to_srgb(c.1)) as u8);
+    //    buf.push((255.0 * linear_to_srgb(c.2)) as u8);
+    //}
+
+    //println!("Writing to {}", filename);
+    //image::save_buffer(
+    //    filename,
+    //    &buf,
+    //    width as u32,
+    //    height as u32,
+    //    image::ColorType::Rgb8,
+    //)
+    //.map_err(Into::into)
+    Ok(())
 }
