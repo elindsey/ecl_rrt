@@ -35,9 +35,8 @@ impl V3 {
         self.dot(self).sqrt()
     }
 
-    fn _is_unit_vector(self) -> bool {
-        // TODO epsilon might be too small?
-        (self.dot(self) - 1.0).abs() < f32::EPSILON
+    fn is_unit_vector(self) -> bool {
+        (self.dot(self) - 1.0).abs() < 0.01
     }
 }
 
@@ -252,7 +251,7 @@ fn cast(
     mut bounces: u32,
     rng_state: &mut u64,
 ) -> V3 {
-    //assert!(dir.is_unit_vector());
+    debug_assert!(dir.is_unit_vector());
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
 
