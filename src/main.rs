@@ -36,7 +36,7 @@ impl V3 {
     }
 
     fn is_unit_vector(self) -> bool {
-        (self.dot(self) - 1.0).abs() < 0.01
+        (self.dot(self) - 1.0).abs() < 0.0001
     }
 }
 
@@ -158,19 +158,13 @@ struct Material {
 struct Sphere {
     p: V3,
     rsqrd: f32,
-    inv_r: f32,
     m: Material,
 }
 
 // TODO eli: add obj-rs support
 impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
-        Sphere {
-            p,
-            rsqrd: r * r,
-            inv_r: 1.0 / r,
-            m,
-        }
+        Sphere { p, rsqrd: r * r, m }
     }
 }
 
@@ -251,11 +245,11 @@ fn cast(
     mut bounces: u32,
     rng_state: &mut u64,
 ) -> V3 {
-    debug_assert!(dir.is_unit_vector());
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
 
     loop {
+        debug_assert!(dir.is_unit_vector());
         let hit = intersect_world(spheres, origin, dir);
         match (hit, bounces) {
             (None, _) => {
@@ -274,8 +268,7 @@ fn cast(
                 origin = hit_point;
                 dir = match s.m.t {
                     MaterialType::Specular => {
-                        // normalize with mulf by 1/s->r, b/c length of that vector is the radius
-                        let hit_normal = (hit_point - s.p) * s.inv_r;
+                        let hit_normal = (hit_point - s.p).normalize();
                         dir.reflect(hit_normal)
                     }
                     MaterialType::Diffuse => {
