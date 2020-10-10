@@ -303,12 +303,20 @@ thread_local! {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Arguments::from_env();
-    let rays_per_pixel = args.opt_value_from_str("-r")?.unwrap_or(100);
-    let rays_per_batch = args.opt_value_from_str("-b")?.unwrap_or(rays_per_pixel);
+    let rays_per_pixel = args.opt_value_from_str(["-r", "--rays"])?.unwrap_or(100);
+    let rays_per_batch = args
+        .opt_value_from_str(["-b", "--batch"])?
+        .unwrap_or(rays_per_pixel);
+    let bounces = args.opt_value_from_str("--bounces")?.unwrap_or(8);
     let filename = args
         .opt_value_from_str("-o")?
         .unwrap_or("out.png".to_string());
     args.finish()?;
+
+    assert!(
+        rays_per_batch <= rays_per_pixel,
+        "number of rays in batch cannot exceed total rays"
+    );
 
     // Materials
     let bg = Material {
@@ -386,7 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // then add a random [0,1) float
                     let ray_p = cam.origin;
                     let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(&bg, &spheres, ray_p, ray_dir, 8, &mut rng_state);
+                    *color += cast(&bg, &spheres, ray_p, ray_dir, bounces, &mut rng_state);
                 }
                 rng_cell.set(rng_state);
             });
