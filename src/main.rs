@@ -7,6 +7,8 @@ use std::{
     time::Instant,
 };
 
+const TOLERANCE: f32 = 0.0001;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct V3(f32, f32, f32);
 
@@ -36,7 +38,7 @@ impl V3 {
     }
 
     fn is_unit_vector(self) -> bool {
-        (self.dot(self) - 1.0).abs() < 0.0001
+        (self.dot(self) - 1.0).abs() < TOLERANCE
     }
 }
 
@@ -201,7 +203,6 @@ fn randf_range(state: &mut u64, min: f32, max: f32) -> f32 {
 fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
     let mut hit = None;
     let mut hit_dist = f32::MAX;
-    let tolerance = 0.0001;
 
     for s in spheres {
         let sphere_relative_origin = origin - s.p;
@@ -221,13 +222,13 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &
             // Second case is less interesting
             // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
             let t = -b - root_term; // -b minus positive
-            if t > tolerance && t < hit_dist {
+            if t > TOLERANCE && t < hit_dist {
                 hit_dist = t;
                 hit = Some((hit_dist, s));
                 continue;
             }
             let t = -b + root_term; // -b plus positive
-            if t > tolerance && t < hit_dist {
+            if t > TOLERANCE && t < hit_dist {
                 hit_dist = t;
                 hit = Some((hit_dist, s));
                 continue;
