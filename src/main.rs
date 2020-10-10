@@ -2,8 +2,9 @@ use pico_args::Arguments;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::{
     cell::Cell,
+    cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, Mul, MulAssign, Sub},
+    ops::{Add, AddAssign, Div, Mul, MulAssign, Sub},
     time::Instant,
 };
 
@@ -61,6 +62,14 @@ impl Add<f32> for V3 {
 impl AddAssign for V3 {
     fn add_assign(&mut self, other: Self) {
         *self = Self(self.0 + other.0, self.1 + other.1, self.2 + other.2)
+    }
+}
+
+impl Div<f32> for V3 {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self {
+        Self(self.0 / rhs, self.1 / rhs, self.2 / rhs)
     }
 }
 
@@ -295,6 +304,7 @@ thread_local! {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Arguments::from_env();
     let rays_per_pixel = args.opt_value_from_str("-r")?.unwrap_or(100);
+    let rays_per_batch = args.opt_value_from_str("-b")?.unwrap_or(rays_per_pixel);
     let filename = args
         .opt_value_from_str("-o")?
         .unwrap_or("out.png".to_string());
@@ -340,24 +350,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let height = 1080;
     let inv_width = 1.0 / (width as f32 - 1.0);
     let inv_height = 1.0 / (height as f32 - 1.0);
-    let inv_rays_per_pixels = 1.0 / rays_per_pixel as f32;
+    let mut pixels = vec![V3(0.0, 0.0, 0.0); width * height];
     let cam = Camera::new(
         V3(0.0, -10.0, 1.0),
         V3(0.0, 0.0, 0.0),
         width as f32 / height as f32,
     );
 
-    let output_every = 1;
-    let batches = rays_per_pixel / output_every;
+    let batches = if rays_per_pixel % rays_per_batch == 0 {
+        rays_per_pixel / rays_per_batch
+    } else {
+        rays_per_pixel / rays_per_batch + 1
+    };
+
     let start = Instant::now();
-    let mut px = vec![V3(0.0, 0.0, 0.0); width * height];
+    let mut rays_shot = 0;
     for b in 0..batches {
-        px.par_iter_mut().enumerate().for_each(|(i, color)| {
+        let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
+
+        pixels.par_iter_mut().enumerate().for_each(|(i, color)| {
             RNG.with(|rng_cell| {
                 let mut rng_state = rng_cell.get();
                 let image_x = (i % width) as f32;
                 let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..output_every {
+                for _ in 0..batch_size {
                     // calculate ratio we've moved along the image (y/height), step proportionally within the film
                     let rand_x = randf01(&mut rng_state);
                     let rand_y = randf01(&mut rng_state);
@@ -375,36 +391,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rng_cell.set(rng_state);
             });
         });
+        rays_shot += batch_size;
+        println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
+
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
-        for c in &px {
-            let cc = *c * (1.0 / ((b + 1) as f32 * output_every as f32));
-            buf.push((255.0 * linear_to_srgb(cc.0)) as u8);
-            buf.push((255.0 * linear_to_srgb(cc.1)) as u8);
-            buf.push((255.0 * linear_to_srgb(cc.2)) as u8);
+        for p in &pixels {
+            let c = *p / rays_shot as f32;
+            buf.push((255.0 * linear_to_srgb(c.0)) as u8);
+            buf.push((255.0 * linear_to_srgb(c.1)) as u8);
+            buf.push((255.0 * linear_to_srgb(c.2)) as u8);
         }
 
-        //println!("Writing to {}", filename);
         let f = format!("{}-{}", b, filename);
         image::save_buffer(f, &buf, width as u32, height as u32, image::ColorType::Rgb8)?;
     }
-
-    println!("Computation took {:.3}s", start.elapsed().as_secs_f32());
-    //let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
-    //for mut c in px {
-    //    c *= inv_rays_per_pixels;
-    //    buf.push((255.0 * linear_to_srgb(c.0)) as u8);
-    //    buf.push((255.0 * linear_to_srgb(c.1)) as u8);
-    //    buf.push((255.0 * linear_to_srgb(c.2)) as u8);
-    //}
-
-    //println!("Writing to {}", filename);
-    //image::save_buffer(
-    //    filename,
-    //    &buf,
-    //    width as u32,
-    //    height as u32,
-    //    image::ColorType::Rgb8,
-    //)
-    //.map_err(Into::into)
+    println!("Rendering took {:.3}s", start.elapsed().as_secs_f32());
     Ok(())
 }
