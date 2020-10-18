@@ -198,14 +198,18 @@ fn pcg(state: &mut u64) -> u32 {
     (((s >> 22) ^ s) >> ((s >> 61) + 22)) as u32
 }
 
-fn randf01(state: &mut u64) -> f32 {
-    let randu = (pcg(state) >> 9) | 0x3f800000;
-    let randf = f32::from_bits(randu) - 1.0;
-    randf
+fn randf() -> f32 {
+    THREAD_RNG.with(|rng_cell| {
+        let mut state = rng_cell.get();
+        let randu = (pcg(&mut state) >> 9) | 0x3f800000;
+        let randf = f32::from_bits(randu) - 1.0;
+        rng_cell.set(state);
+        randf
+    })
 }
 
-fn randf_range(state: &mut u64, min: f32, max: f32) -> f32 {
-    min + (max - min) * randf01(state)
+fn randf_range(min: f32, max: f32) -> f32 {
+    min + (max - min) * randf()
 }
 
 fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
@@ -246,14 +250,7 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &
     hit
 }
 
-fn cast(
-    bg: &Material,
-    spheres: &Vec<Sphere>,
-    mut origin: V3,
-    mut dir: V3,
-    mut bounces: u32,
-    rng_state: &mut u64,
-) -> V3 {
+fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut bounces: u32) -> V3 {
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
 
@@ -281,8 +278,8 @@ fn cast(
                         dir.reflect(hit_normal)
                     }
                     MaterialType::Diffuse => {
-                        let a = randf_range(rng_state, 0.0, 2.0 * PI);
-                        let z = randf_range(rng_state, -1.0, 1.0);
+                        let a = randf_range(0.0, 2.0 * PI);
+                        let z = randf_range(-1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
                         V3(r * a.cos(), r * a.sin(), z)
                     }
@@ -294,7 +291,7 @@ fn cast(
 }
 
 thread_local! {
-    static RNG: Cell<u64> = {
+    static THREAD_RNG: Cell<u64> = {
         let mut buf = [0u8; 8];
         getrandom::getrandom(&mut buf).unwrap();
         Cell::new(u64::from_le_bytes(buf))
@@ -377,27 +374,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
         pixels.par_iter_mut().enumerate().for_each(|(i, color)| {
-            RNG.with(|rng_cell| {
-                let mut rng_state = rng_cell.get();
-                let image_x = (i % width) as f32;
-                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..batch_size {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf01(&mut rng_state);
-                    let rand_y = randf01(&mut rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+            let image_x = (i % width) as f32;
+            let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+            for _ in 0..batch_size {
+                // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                let rand_x = randf();
+                let rand_y = randf();
+                let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                let film_p = cam.film_lower_left + film_x + film_y;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(&bg, &spheres, ray_p, ray_dir, bounces, &mut rng_state);
-                }
-                rng_cell.set(rng_state);
-            });
+                // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                // then add a random [0,1) float
+                let ray_p = cam.origin;
+                let ray_dir = (film_p - cam.origin).normalize();
+                *color += cast(&bg, &spheres, ray_p, ray_dir, bounces);
+            }
         });
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
