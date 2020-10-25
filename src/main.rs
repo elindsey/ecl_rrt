@@ -6,7 +6,7 @@ use std::{
     cell::Cell,
     cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, BitOr, BitXorAssign, Div, Mul, MulAssign, Shl, Shr, Sub},
+    ops::{Add, AddAssign, BitOr, BitXorAssign, Div, Mul, MulAssign, Neg, Shl, Shr, Sub},
     time::Instant,
 };
 
@@ -59,8 +59,8 @@ impl From<f32> for WideF32 {
     }
 }
 
-impl From<&[f32; 8]> for WideF32 {
-    fn from(x: &[f32; 8]) -> Self {
+impl From<[f32; 8]> for WideF32 {
+    fn from(x: [f32; 8]) -> Self {
         Self(_mm256_load_ps(x.as_ptr()))
     }
 }
@@ -106,6 +106,14 @@ impl Mul for WideF32 {
 impl MulAssign for WideF32 {
     fn mul_assign(&mut self, other: Self) {
         self.0 = _mm256_mul_ps(self.0, other.0)
+    }
+}
+
+impl Neg for WideF32 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self(_mm256_xor_ps(self.0, _mm256_set1_ps(-0.0)))
     }
 }
 
@@ -387,44 +395,6 @@ fn randf_range(min: f32, max: f32) -> WideF32 {
     WideF32::from(min) + WideF32::from(max - min) * randf()
 }
 
-fn intersect_world(spheres: &Vec<Sphere>, origin: WideV3, dir: WideV3) -> Option<(f32, &Sphere)> {
-    let mut hit = None;
-    let mut hit_dist = f32::MAX;
-
-    for s in spheres {
-        let sphere_relative_origin = origin - s.p;
-        let b = dir.dot(sphere_relative_origin);
-        let c = sphere_relative_origin.dot(sphere_relative_origin) - s.rsqrd;
-        let discr = b * b - c;
-
-        // at least one real root, meaning we've hit the sphere
-        if discr > 0.0 {
-            let root_term = discr.sqrt();
-            // Order here matters. root_term is positive; b may be positive or negative
-            //
-            // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
-            // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
-            // must be first.
-            //
-            // Second case is less interesting
-            // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
-            let t = -b - root_term; // -b minus positive
-            if t > TOLERANCE && t < hit_dist {
-                hit_dist = t;
-                hit = Some((hit_dist, s));
-                continue;
-            }
-            let t = -b + root_term; // -b plus positive
-            if t > TOLERANCE && t < hit_dist {
-                hit_dist = t;
-                hit = Some((hit_dist, s));
-                continue;
-            }
-        }
-    }
-    hit
-}
-
 fn raycast(
     bg: &Material,
     spheres: &Vec<Sphere>,
@@ -436,8 +406,42 @@ fn raycast(
     let mut reflectance = WideV3::new_bcast(1.0, 1.0, 1.0);
 
     loop {
-        debug_assert!(dir.is_unit_vector());
-        let hit = intersect_world(spheres, origin, dir);
+        //debug_assert!(dir.is_unit_vector());
+        let mut hit = None;
+        let mut hit_dist = f32::MAX;
+
+        for s in spheres {
+            let sphere_relative_origin = origin - s.p;
+            let b = dir.dot(sphere_relative_origin);
+            let c = sphere_relative_origin.dot(sphere_relative_origin) - s.rsqrd;
+            let discr = b * b - c;
+
+            // at least one real root, meaning we've hit the sphere
+            if discr > 0.0 {
+                let root_term = discr.sqrt();
+                // Order here matters. root_term is positive; b may be positive or negative
+                //
+                // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
+                // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
+                // must be first.
+                //
+                // Second case is less interesting
+                // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
+                let t = -b - root_term; // -b minus positive
+                if t > TOLERANCE && t < hit_dist {
+                    hit_dist = t;
+                    hit = Some((hit_dist, s));
+                    continue;
+                }
+                let t = -b + root_term; // -b plus positive
+                if t > TOLERANCE && t < hit_dist {
+                    hit_dist = t;
+                    hit = Some((hit_dist, s));
+                    continue;
+                }
+            }
+        }
+
         match (hit, bounces) {
             (None, _) => {
                 color += reflectance * bg.emit_color;
@@ -569,8 +573,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ys[idx] = (height - (i / width) - 1) as f32;
                 i += 1;
             }
-            let image_x = WideF32::from(&xs);
-            let image_y = WideF32::from(&ys);
+            let image_x = WideF32::from(xs);
+            let image_y = WideF32::from(ys);
             //let image_x = (i % width) as f32;
             //let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
             for _ in 0..batch_size {
