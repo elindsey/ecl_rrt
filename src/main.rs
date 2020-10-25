@@ -10,48 +10,130 @@ use std::{
 
 const TOLERANCE: f32 = 0.0001;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-struct V3 {
-    x: f32,
-    y: f32,
-    z: f32,
+#[cfg(target_arch = "x86")]
+use std::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "avx2"
+))]
+type LaneF32 = F32x8;
+
+#[derive(Debug, Copy, Clone)]
+struct V3(f32, f32, f32);
+
+#[derive(Debug, Copy, Clone)]
+struct F32x8(__m256);
+
+impl From<f32> for F32x8 {
+    fn from(x: f32) -> Self {
+        Self(_mm256_set1_ps(x))
+    }
 }
 
-impl V3 {
-    fn new(x: f32, y: f32, z: f32) -> V3 {
-        V3 { x, y, z }
+impl Add for F32x8 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(_mm256_add_ps(self.0, other.0))
+    }
+}
+
+impl AddAssign for F32x8 {
+    fn add_assign(&mut self, other: Self) {
+        self.0 = _mm256_add_ps(self.0, other.0)
+    }
+}
+
+impl Div for F32x8 {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self {
+        Self(_mm256_div_ps(self.0, other.0))
+    }
+}
+
+impl Sub for F32x8 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self(_mm256_sub_ps(self.0, other.0))
+    }
+}
+
+impl Mul for F32x8 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        Self(_mm256_mul_ps(self.0, other.0))
+    }
+}
+
+impl MulAssign for F32x8 {
+    fn mul_assign(&mut self, other: Self) {
+        self.0 = _mm256_mul_ps(self.0, other.0)
+    }
+}
+
+//impl PartialEq for F32x8 {
+//    fn eq(&self, other: &Self) -> bool {
+//
+//    }
+//}
+
+#[derive(Debug, Copy, Clone)]
+struct LaneV3 {
+    x: LaneF32,
+    y: LaneF32,
+    z: LaneF32,
+}
+
+impl LaneV3 {
+    fn new(x: LaneF32, y: LaneF32, z: LaneF32) -> LaneV3 {
+        LaneV3 { x, y, z }
     }
 
-    fn dot(self, other: V3) -> f32 {
+    fn new_bcast(x: f32, y: f32, z: f32) -> LaneV3 {
+        LaneV3 {
+            x: F32x8::from(x),
+            y: F32x8::from(y),
+            z: F32x8::from(z),
+        }
+    }
+
+    fn dot(self, other: LaneV3) -> LaneF32 {
         self.x * other.x + self.y * other.y + self.z * other.z
     }
 
-    fn cross(self, other: V3) -> V3 {
-        V3::new(
+    fn cross(self, other: LaneV3) -> LaneV3 {
+        LaneV3::new(
             self.y * other.z - self.z * other.y,
             self.z * other.x - self.x * other.z,
             self.x * other.y - self.y * other.x,
         )
     }
 
-    fn normalize(self) -> V3 {
-        self * (1.0 / self.len())
+    fn normalize(self) -> LaneV3 {
+        self * (F32x8::from(1.0) / self.len())
     }
 
-    fn reflect(self, normal: V3) -> V3 {
-        self - normal * self.dot(normal) * 2.0
+    fn reflect(self, normal: LaneV3) -> LaneV3 {
+        self - normal * self.dot(normal) * F32x8::from(2.0)
     }
 
-    fn len(self) -> f32 {
+    fn len(self) -> LaneF32 {
         self.dot(self).sqrt()
     }
 
+    // TODO eli: lanebool
     fn is_unit_vector(self) -> bool {
-        (self.dot(self) - 1.0).abs() < TOLERANCE
+        (self.dot(self) - F32x8::from(1.0)).abs() < TOLERANCE
     }
 }
 
-impl Add for V3 {
+impl Add for LaneV3 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -59,29 +141,29 @@ impl Add for V3 {
     }
 }
 
-impl Add<f32> for V3 {
+impl Add<LaneF32> for LaneV3 {
     type Output = Self;
 
-    fn add(self, rhs: f32) -> Self {
+    fn add(self, rhs: LaneF32) -> Self {
         Self::new(self.x + rhs, self.y + rhs, self.z + rhs)
     }
 }
 
-impl AddAssign for V3 {
+impl AddAssign for LaneV3 {
     fn add_assign(&mut self, other: Self) {
         *self = Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
     }
 }
 
-impl Div<f32> for V3 {
+impl Div<LaneF32> for LaneV3 {
     type Output = Self;
 
-    fn div(self, rhs: f32) -> Self {
+    fn div(self, rhs: LaneF32) -> Self {
         Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
 
-impl Sub for V3 {
+impl Sub for LaneV3 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
@@ -89,15 +171,15 @@ impl Sub for V3 {
     }
 }
 
-impl Sub<f32> for V3 {
+impl Sub<LaneF32> for LaneV3 {
     type Output = Self;
 
-    fn sub(self, rhs: f32) -> Self {
+    fn sub(self, rhs: LaneF32) -> Self {
         Self::new(self.x - rhs, self.y - rhs, self.z - rhs)
     }
 }
 
-impl Mul for V3 {
+impl Mul for LaneV3 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
@@ -105,21 +187,21 @@ impl Mul for V3 {
     }
 }
 
-impl Mul<f32> for V3 {
+impl Mul<LaneF32> for LaneV3 {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self {
+    fn mul(self, rhs: LaneF32) -> Self {
         Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
-impl MulAssign<f32> for V3 {
-    fn mul_assign(&mut self, rhs: f32) {
+impl MulAssign<LaneF32> for LaneV3 {
+    fn mul_assign(&mut self, rhs: LaneF32) {
         *self = Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
-impl MulAssign for V3 {
+impl MulAssign for LaneV3 {
     fn mul_assign(&mut self, other: Self) {
         *self = Self::new(self.x * other.x, self.y * other.y, self.z * other.z)
     }
@@ -127,27 +209,28 @@ impl MulAssign for V3 {
 
 #[derive(Debug)]
 struct Camera {
-    origin: V3,
-    x: V3,
-    y: V3,
-    z: V3,
-    film_lower_left: V3,
-    film_width: f32,
-    film_height: f32,
+    origin: LaneV3,
+    x: LaneV3,
+    y: LaneV3,
+    z: LaneV3,
+    film_lower_left: LaneV3,
+    film_width: LaneF32,
+    film_height: LaneF32,
 }
 
 impl Camera {
-    fn new(look_from: V3, look_at: V3, aspect_ratio: f32) -> Camera {
+    fn new(look_from: LaneV3, look_at: LaneV3, aspect_ratio: f32) -> Camera {
         assert!(aspect_ratio > 1.0, "width must be greater than height");
 
         let origin = look_from - look_at;
         let z = origin.normalize();
-        let x = V3::new(0.0, 0.0, 1.0).cross(z).normalize();
+        let x = LaneV3::new_bcast(0.0, 0.0, 1.0).cross(z).normalize();
         let y = z.cross(x).normalize();
 
-        let film_height = 1.0;
-        let film_width = film_height * aspect_ratio;
-        let film_lower_left = origin - z - y * 0.5 * film_height - x * 0.5 * film_width;
+        let film_height = F32x8::from(1.0);
+        let film_width = film_height * F32x8::from(aspect_ratio);
+        let film_lower_left =
+            origin - z - y * F32x8::from(0.5) * film_height - x * F32x8::from(0.5) * film_width;
 
         Camera {
             origin,
@@ -167,7 +250,7 @@ enum MaterialType {
     Specular,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct Material {
     emit_color: V3,
     reflect_color: V3,
@@ -206,21 +289,22 @@ fn pcg(state: &mut u64) -> u32 {
     (((s >> 22) ^ s) >> ((s >> 61) + 22)) as u32
 }
 
-fn randf() -> f32 {
+// TODO eli: switch back to xorshift and compute a different rng per lane
+fn randf() -> LaneF32 {
     THREAD_RNG.with(|rng_cell| {
         let mut state = rng_cell.get();
         let randu = (pcg(&mut state) >> 9) | 0x3f800000;
         let randf = f32::from_bits(randu) - 1.0;
         rng_cell.set(state);
-        randf
+        F32x8::from(randf)
     })
 }
 
-fn randf_range(min: f32, max: f32) -> f32 {
-    min + (max - min) * randf()
+fn randf_range(min: f32, max: f32) -> LaneF32 {
+    F32x8::from(min) + F32x8::from(max - min) * randf()
 }
 
-fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
+fn intersect_world(spheres: &Vec<Sphere>, origin: LaneV3, dir: LaneV3) -> Option<(f32, &Sphere)> {
     let mut hit = None;
     let mut hit_dist = f32::MAX;
 
@@ -258,9 +342,15 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &
     hit
 }
 
-fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut bounces: u32) -> V3 {
-    let mut color = V3::new(0.0, 0.0, 0.0);
-    let mut reflectance = V3::new(1.0, 1.0, 1.0);
+fn cast(
+    bg: &Material,
+    spheres: &Vec<Sphere>,
+    mut origin: LaneV3,
+    mut dir: LaneV3,
+    mut bounces: u32,
+) -> LaneV3 {
+    let mut color = LaneV3::new_bcast(0.0, 0.0, 0.0);
+    let mut reflectance = LaneV3::new_bcast(1.0, 1.0, 1.0);
 
     loop {
         debug_assert!(dir.is_unit_vector());
@@ -289,7 +379,7 @@ fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut b
                         let a = randf_range(0.0, 2.0 * PI);
                         let z = randf_range(-1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
-                        V3::new(r * a.cos(), r * a.sin(), z)
+                        LaneV3::new_bcast(r * a.cos(), r * a.sin(), z)
                     }
                 };
             }
@@ -325,48 +415,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Materials
     let bg = Material {
-        emit_color: V3::new(0.3, 0.4, 0.8),
-        reflect_color: V3::new(0.0, 0.0, 0.0),
+        emit_color: V3(0.3, 0.4, 0.8),
+        reflect_color: V3(0.0, 0.0, 0.0),
         t: MaterialType::Specular,
     };
     let ground = Material {
-        emit_color: V3::new(0.0, 0.0, 0.0),
-        reflect_color: V3::new(0.5, 0.5, 0.5),
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(0.5, 0.5, 0.5),
         t: MaterialType::Diffuse,
     };
     let left = Material {
-        emit_color: V3::new(0.0, 0.0, 0.0),
-        reflect_color: V3::new(1.0, 0.0, 0.0),
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(1.0, 0.0, 0.0),
         t: MaterialType::Specular,
     };
     let center = Material {
-        emit_color: V3::new(0.4, 0.8, 0.9),
-        reflect_color: V3::new(0.8, 0.8, 0.8),
+        emit_color: V3(0.4, 0.8, 0.9),
+        reflect_color: V3(0.8, 0.8, 0.8),
         t: MaterialType::Specular,
     };
     let right = Material {
-        emit_color: V3::new(0.0, 0.0, 0.0),
-        reflect_color: V3::new(0.95, 0.95, 0.95),
+        emit_color: V3(0.0, 0.0, 0.0),
+        reflect_color: V3(0.95, 0.95, 0.95),
         t: MaterialType::Specular,
     };
 
     let spheres = vec![
-        Sphere::new(V3::new(0.0, 0.0, -100.0), 100.0, ground),
-        Sphere::new(V3::new(0.0, 0.0, 1.0), 1.0, center),
-        Sphere::new(V3::new(-2.0, -3.0, 1.5), 0.3, right.clone()),
-        Sphere::new(V3::new(-3.0, -6.0, 0.0), 0.3, right.clone()),
-        Sphere::new(V3::new(-3.0, -5.0, 2.0), 0.5, left),
-        Sphere::new(V3::new(3.0, -3.0, 0.8), 1.0, right),
+        Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground),
+        Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center),
+        Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left),
+        Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right),
     ];
 
     let width = 1920;
     let height = 1080;
     let inv_width = 1.0 / (width as f32 - 1.0);
     let inv_height = 1.0 / (height as f32 - 1.0);
-    let mut pixels = vec![V3::new(0.0, 0.0, 0.0); width * height];
+    let mut pixels = vec![V3(0.0, 0.0, 0.0); width * height];
     let cam = Camera::new(
-        V3::new(0.0, -10.0, 1.0),
-        V3::new(0.0, 0.0, 0.0),
+        LaneV3::new_bcast(0.0, -10.0, 1.0),
+        LaneV3::new_bcast(0.0, 0.0, 0.0),
         width as f32 / height as f32,
     );
 
@@ -381,7 +471,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for b in 0..batches {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
+        // TODO eli: problem here: if the pixels is a group of lanes then our image_x/y math will be off here
+        // probably need to keep the pixels array as flat v3s then do the batching inside this loop
         pixels.par_iter_mut().enumerate().for_each(|(i, color)| {
+            // need to iter by chunks then pack all the image_x/y into an f32x8
             let image_x = (i % width) as f32;
             let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
             for _ in 0..batch_size {
@@ -405,10 +498,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
         for p in &pixels {
-            let c = *p / rays_shot as f32;
-            buf.push((255.0 * linear_to_srgb(c.x)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.y)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.z)) as u8);
+            buf.push((255.0 * linear_to_srgb(p.0 / rays_shot as f32)) as u8);
+            buf.push((255.0 * linear_to_srgb(p.1 / rays_shot as f32)) as u8);
+            buf.push((255.0 * linear_to_srgb(p.2 / rays_shot as f32)) as u8);
         }
 
         let f = format!("{}-{}", b, filename);
