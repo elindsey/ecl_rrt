@@ -1,5 +1,5 @@
 use pico_args::Arguments;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::prelude::*;
 use std::{
     cell::Cell,
     cmp,
@@ -9,31 +9,36 @@ use std::{
 };
 
 const TOLERANCE: f32 = 0.0001;
+const WIDTH: usize = 8;
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-#[cfg(all(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    target_feature = "avx2"
-))]
-type LaneF32 = F32x8;
-
+//#[cfg(all(
+//    any(target_arch = "x86", target_arch = "x86_64"),
+//    target_feature = "avx2"
+//))]
 #[derive(Debug, Copy, Clone)]
 struct V3(f32, f32, f32);
 
 #[derive(Debug, Copy, Clone)]
-struct F32x8(__m256);
+struct WideF32(__m256);
 
-impl From<f32> for F32x8 {
+impl From<f32> for WideF32 {
     fn from(x: f32) -> Self {
         Self(_mm256_set1_ps(x))
     }
 }
 
-impl Add for F32x8 {
+impl From<&[f32; 8]> for WideF32 {
+    fn from(x: &[f32; 8]) -> Self {
+        Self(_mm256_load_ps(x.as_ptr()))
+    }
+}
+
+impl Add for WideF32 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -41,13 +46,13 @@ impl Add for F32x8 {
     }
 }
 
-impl AddAssign for F32x8 {
+impl AddAssign for WideF32 {
     fn add_assign(&mut self, other: Self) {
         self.0 = _mm256_add_ps(self.0, other.0)
     }
 }
 
-impl Div for F32x8 {
+impl Div for WideF32 {
     type Output = Self;
 
     fn div(self, other: Self) -> Self {
@@ -55,7 +60,7 @@ impl Div for F32x8 {
     }
 }
 
-impl Sub for F32x8 {
+impl Sub for WideF32 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
@@ -63,7 +68,7 @@ impl Sub for F32x8 {
     }
 }
 
-impl Mul for F32x8 {
+impl Mul for WideF32 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
@@ -71,69 +76,63 @@ impl Mul for F32x8 {
     }
 }
 
-impl MulAssign for F32x8 {
+impl MulAssign for WideF32 {
     fn mul_assign(&mut self, other: Self) {
         self.0 = _mm256_mul_ps(self.0, other.0)
     }
 }
 
-//impl PartialEq for F32x8 {
-//    fn eq(&self, other: &Self) -> bool {
-//
-//    }
-//}
-
 #[derive(Debug, Copy, Clone)]
-struct LaneV3 {
-    x: LaneF32,
-    y: LaneF32,
-    z: LaneF32,
+struct WideV3 {
+    x: WideF32,
+    y: WideF32,
+    z: WideF32,
 }
 
-impl LaneV3 {
-    fn new(x: LaneF32, y: LaneF32, z: LaneF32) -> LaneV3 {
-        LaneV3 { x, y, z }
+impl WideV3 {
+    fn new(x: WideF32, y: WideF32, z: WideF32) -> WideV3 {
+        WideV3 { x, y, z }
     }
 
-    fn new_bcast(x: f32, y: f32, z: f32) -> LaneV3 {
-        LaneV3 {
-            x: F32x8::from(x),
-            y: F32x8::from(y),
-            z: F32x8::from(z),
+    fn new_bcast(x: f32, y: f32, z: f32) -> WideV3 {
+        WideV3 {
+            x: WideF32::from(x),
+            y: WideF32::from(y),
+            z: WideF32::from(z),
         }
     }
 
-    fn dot(self, other: LaneV3) -> LaneF32 {
+    fn dot(self, other: WideV3) -> WideF32 {
         self.x * other.x + self.y * other.y + self.z * other.z
     }
 
-    fn cross(self, other: LaneV3) -> LaneV3 {
-        LaneV3::new(
+    fn cross(self, other: WideV3) -> WideV3 {
+        WideV3::new(
             self.y * other.z - self.z * other.y,
             self.z * other.x - self.x * other.z,
             self.x * other.y - self.y * other.x,
         )
     }
 
-    fn normalize(self) -> LaneV3 {
-        self * (F32x8::from(1.0) / self.len())
+    fn normalize(self) -> WideV3 {
+        self * (WideF32::from(1.0) / self.len())
     }
 
-    fn reflect(self, normal: LaneV3) -> LaneV3 {
-        self - normal * self.dot(normal) * F32x8::from(2.0)
+    fn reflect(self, normal: WideV3) -> WideV3 {
+        self - normal * self.dot(normal) * WideF32::from(2.0)
     }
 
-    fn len(self) -> LaneF32 {
+    fn len(self) -> WideF32 {
         self.dot(self).sqrt()
     }
 
     // TODO eli: lanebool
     fn is_unit_vector(self) -> bool {
-        (self.dot(self) - F32x8::from(1.0)).abs() < TOLERANCE
+        (self.dot(self) - WideF32::from(1.0)).abs() < TOLERANCE
     }
 }
 
-impl Add for LaneV3 {
+impl Add for WideV3 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -141,29 +140,29 @@ impl Add for LaneV3 {
     }
 }
 
-impl Add<LaneF32> for LaneV3 {
+impl Add<WideF32> for WideV3 {
     type Output = Self;
 
-    fn add(self, rhs: LaneF32) -> Self {
+    fn add(self, rhs: WideF32) -> Self {
         Self::new(self.x + rhs, self.y + rhs, self.z + rhs)
     }
 }
 
-impl AddAssign for LaneV3 {
+impl AddAssign for WideV3 {
     fn add_assign(&mut self, other: Self) {
         *self = Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
     }
 }
 
-impl Div<LaneF32> for LaneV3 {
+impl Div<WideF32> for WideV3 {
     type Output = Self;
 
-    fn div(self, rhs: LaneF32) -> Self {
+    fn div(self, rhs: WideF32) -> Self {
         Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
 
-impl Sub for LaneV3 {
+impl Sub for WideV3 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
@@ -171,15 +170,15 @@ impl Sub for LaneV3 {
     }
 }
 
-impl Sub<LaneF32> for LaneV3 {
+impl Sub<WideF32> for WideV3 {
     type Output = Self;
 
-    fn sub(self, rhs: LaneF32) -> Self {
+    fn sub(self, rhs: WideF32) -> Self {
         Self::new(self.x - rhs, self.y - rhs, self.z - rhs)
     }
 }
 
-impl Mul for LaneV3 {
+impl Mul for WideV3 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
@@ -187,21 +186,21 @@ impl Mul for LaneV3 {
     }
 }
 
-impl Mul<LaneF32> for LaneV3 {
+impl Mul<WideF32> for WideV3 {
     type Output = Self;
 
-    fn mul(self, rhs: LaneF32) -> Self {
+    fn mul(self, rhs: WideF32) -> Self {
         Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
-impl MulAssign<LaneF32> for LaneV3 {
-    fn mul_assign(&mut self, rhs: LaneF32) {
+impl MulAssign<WideF32> for WideV3 {
+    fn mul_assign(&mut self, rhs: WideF32) {
         *self = Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
-impl MulAssign for LaneV3 {
+impl MulAssign for WideV3 {
     fn mul_assign(&mut self, other: Self) {
         *self = Self::new(self.x * other.x, self.y * other.y, self.z * other.z)
     }
@@ -209,28 +208,28 @@ impl MulAssign for LaneV3 {
 
 #[derive(Debug)]
 struct Camera {
-    origin: LaneV3,
-    x: LaneV3,
-    y: LaneV3,
-    z: LaneV3,
-    film_lower_left: LaneV3,
-    film_width: LaneF32,
-    film_height: LaneF32,
+    origin: WideV3,
+    x: WideV3,
+    y: WideV3,
+    z: WideV3,
+    film_lower_left: WideV3,
+    film_width: WideF32,
+    film_height: WideF32,
 }
 
 impl Camera {
-    fn new(look_from: LaneV3, look_at: LaneV3, aspect_ratio: f32) -> Camera {
+    fn new(look_from: WideV3, look_at: WideV3, aspect_ratio: f32) -> Camera {
         assert!(aspect_ratio > 1.0, "width must be greater than height");
 
         let origin = look_from - look_at;
         let z = origin.normalize();
-        let x = LaneV3::new_bcast(0.0, 0.0, 1.0).cross(z).normalize();
+        let x = WideV3::new_bcast(0.0, 0.0, 1.0).cross(z).normalize();
         let y = z.cross(x).normalize();
 
-        let film_height = F32x8::from(1.0);
-        let film_width = film_height * F32x8::from(aspect_ratio);
+        let film_height = WideF32::from(1.0);
+        let film_width = film_height * WideF32::from(aspect_ratio);
         let film_lower_left =
-            origin - z - y * F32x8::from(0.5) * film_height - x * F32x8::from(0.5) * film_width;
+            origin - z - y * WideF32::from(0.5) * film_height - x * WideF32::from(0.5) * film_width;
 
         Camera {
             origin,
@@ -290,21 +289,21 @@ fn pcg(state: &mut u64) -> u32 {
 }
 
 // TODO eli: switch back to xorshift and compute a different rng per lane
-fn randf() -> LaneF32 {
+fn randf() -> WideF32 {
     THREAD_RNG.with(|rng_cell| {
         let mut state = rng_cell.get();
         let randu = (pcg(&mut state) >> 9) | 0x3f800000;
         let randf = f32::from_bits(randu) - 1.0;
         rng_cell.set(state);
-        F32x8::from(randf)
+        WideF32::from(randf)
     })
 }
 
-fn randf_range(min: f32, max: f32) -> LaneF32 {
-    F32x8::from(min) + F32x8::from(max - min) * randf()
+fn randf_range(min: f32, max: f32) -> WideF32 {
+    WideF32::from(min) + WideF32::from(max - min) * randf()
 }
 
-fn intersect_world(spheres: &Vec<Sphere>, origin: LaneV3, dir: LaneV3) -> Option<(f32, &Sphere)> {
+fn intersect_world(spheres: &Vec<Sphere>, origin: WideV3, dir: WideV3) -> Option<(f32, &Sphere)> {
     let mut hit = None;
     let mut hit_dist = f32::MAX;
 
@@ -342,15 +341,15 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: LaneV3, dir: LaneV3) -> Option
     hit
 }
 
-fn cast(
+fn raycast(
     bg: &Material,
     spheres: &Vec<Sphere>,
-    mut origin: LaneV3,
-    mut dir: LaneV3,
+    mut origin: WideV3,
+    mut dir: WideV3,
     mut bounces: u32,
-) -> LaneV3 {
-    let mut color = LaneV3::new_bcast(0.0, 0.0, 0.0);
-    let mut reflectance = LaneV3::new_bcast(1.0, 1.0, 1.0);
+) -> WideV3 {
+    let mut color = WideV3::new_bcast(0.0, 0.0, 0.0);
+    let mut reflectance = WideV3::new_bcast(1.0, 1.0, 1.0);
 
     loop {
         debug_assert!(dir.is_unit_vector());
@@ -379,7 +378,7 @@ fn cast(
                         let a = randf_range(0.0, 2.0 * PI);
                         let z = randf_range(-1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
-                        LaneV3::new_bcast(r * a.cos(), r * a.sin(), z)
+                        WideV3::new_bcast(r * a.cos(), r * a.sin(), z)
                     }
                 };
             }
@@ -453,10 +452,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let height = 1080;
     let inv_width = 1.0 / (width as f32 - 1.0);
     let inv_height = 1.0 / (height as f32 - 1.0);
-    let mut pixels = vec![V3(0.0, 0.0, 0.0); width * height];
+    // TODO eli: bugs when pixels % WIDTH != 0
+    let mut pixels = vec![WideV3::new_bcast(0.0, 0.0, 0.0); width * height / WIDTH];
     let cam = Camera::new(
-        LaneV3::new_bcast(0.0, -10.0, 1.0),
-        LaneV3::new_bcast(0.0, 0.0, 0.0),
+        WideV3::new_bcast(0.0, -10.0, 1.0),
+        WideV3::new_bcast(0.0, 0.0, 0.0),
         width as f32 / height as f32,
     );
 
@@ -473,16 +473,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO eli: problem here: if the pixels is a group of lanes then our image_x/y math will be off here
         // probably need to keep the pixels array as flat v3s then do the batching inside this loop
-        pixels.par_iter_mut().enumerate().for_each(|(i, color)| {
+        pixels.par_iter_mut().enumerate().for_each(|(i, colors)| {
             // need to iter by chunks then pack all the image_x/y into an f32x8
-            let image_x = (i % width) as f32;
-            let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+            let mut i = i * WIDTH;
+            let xs: [f32; WIDTH];
+            let ys: [f32; WIDTH];
+            for idx in 0..WIDTH {
+                xs[idx] = (i % width) as f32;
+                ys[idx] = (height - (i / width) - 1) as f32;
+                i += 1;
+            }
+            let image_x = WideF32::from(&xs);
+            let image_y = WideF32::from(&ys);
+            //let image_x = (i % width) as f32;
+            //let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
             for _ in 0..batch_size {
                 // calculate ratio we've moved along the image (y/height), step proportionally within the film
                 let rand_x = randf();
                 let rand_y = randf();
-                let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                let film_x = cam.x * cam.film_width * (image_x + rand_x) * WideF32::from(inv_width);
+                let film_y =
+                    cam.y * cam.film_height * (image_y + rand_y) * WideF32::from(inv_height);
                 let film_p = cam.film_lower_left + film_x + film_y;
 
                 // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
@@ -490,17 +501,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // then add a random [0,1) float
                 let ray_p = cam.origin;
                 let ray_dir = (film_p - cam.origin).normalize();
-                *color += cast(&bg, &spheres, ray_p, ray_dir, bounces);
+                *colors += raycast(&bg, &spheres, ray_p, ray_dir, bounces);
             }
         });
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
 
+        // TODO eli: it's easier to do a pixel at a time, simd the rays, then horizontal add them to get a color
+        // that would require reworking some of the incremental batching though
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
         for p in &pixels {
-            buf.push((255.0 * linear_to_srgb(p.0 / rays_shot as f32)) as u8);
-            buf.push((255.0 * linear_to_srgb(p.1 / rays_shot as f32)) as u8);
-            buf.push((255.0 * linear_to_srgb(p.2 / rays_shot as f32)) as u8);
+            // maybe? https://users.rust-lang.org/t/correct-way-to-use-the-simd-intrinsics/42271/9
+            // hard to tell what is and isn't UB in rust
+            let x: [f32; 8] = unsafe { std::mem::transmute(p.x) };
+            let y: [f32; 8] = unsafe { std::mem::transmute(p.y) };
+            let z: [f32; 8] = unsafe { std::mem::transmute(p.z) };
+            for idx in 0..8 {
+                buf.push((255.0 * linear_to_srgb(x[idx] / rays_shot as f32)) as u8);
+                buf.push((255.0 * linear_to_srgb(y[idx] / rays_shot as f32)) as u8);
+                buf.push((255.0 * linear_to_srgb(z[idx] / rays_shot as f32)) as u8);
+            }
         }
 
         let f = format!("{}-{}", b, filename);
