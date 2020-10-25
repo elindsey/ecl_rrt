@@ -6,7 +6,7 @@ use std::{
     cell::Cell,
     cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, BitOr, BitXorAssign, Div, Mul, MulAssign, Neg, Shl, Shr, Sub},
+    ops::{Add, AddAssign, BitAnd, BitOr, BitXorAssign, Div, Mul, MulAssign, Neg, Shl, Shr, Sub},
     time::Instant,
 };
 
@@ -36,6 +36,10 @@ struct WideF32(__m256);
 impl WideF32 {
     //fn abs(&self) -> Self {
     //}
+
+    fn select(x: WideF32, y: WideF32, mask: WideF32) -> WideF32 {
+        WideF32(_mm256_blendv_ps(x.0, y.0, mask.0))
+    }
 
     fn cos(&self) -> Self {
         // TODO eli: implement this
@@ -84,6 +88,22 @@ impl Add for WideF32 {
 impl AddAssign for WideF32 {
     fn add_assign(&mut self, other: Self) {
         self.0 = _mm256_add_ps(self.0, other.0)
+    }
+}
+
+impl BitAnd for WideF32 {
+    type Output = Self;
+
+    fn bitand(self, other: Self) -> Self {
+        Self(_mm256_and_ps(self.0, other.0))
+    }
+}
+
+impl BitOr for WideF32 {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(_mm256_or_ps(self.0, other.0))
     }
 }
 
@@ -419,8 +439,8 @@ fn raycast(
 
     loop {
         //debug_assert!(dir.is_unit_vector());
-        let mut hit = None;
-        let mut hit_dist = f32::MAX;
+        let mut hit = WideU32::from(0);
+        let mut hit_dist = WideF32::from(f32::MAX);
 
         for s in spheres {
             let sphere_relative_origin = origin - s.p;
@@ -429,29 +449,35 @@ fn raycast(
             let discr = b * b - c;
 
             // at least one real root, meaning we've hit the sphere
-            if discr > 0.0 {
-                let root_term = discr.sqrt();
-                // Order here matters. root_term is positive; b may be positive or negative
-                //
-                // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
-                // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
-                // must be first.
-                //
-                // Second case is less interesting
-                // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
-                let t = -b - root_term; // -b minus positive
-                if t > TOLERANCE && t < hit_dist {
-                    hit_dist = t;
-                    hit = Some((hit_dist, s));
-                    continue;
-                }
-                let t = -b + root_term; // -b plus positive
-                if t > TOLERANCE && t < hit_dist {
-                    hit_dist = t;
-                    hit = Some((hit_dist, s));
-                    continue;
-                }
-            }
+            let discrmask = discr.gt(WideF32::from(0.0));
+            // TODO eli: short circuit if mask is all empty
+            let root_term = discr.sqrt();
+            // Order here matters, must consider t0 first. root_term is positive; b may be positive or negative
+            //
+            // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
+            // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
+            // must be first.
+            //
+            // Second case is less interesting
+            // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
+
+            // TODO eli: move -b redundancy out
+            let t0 = -b - root_term;
+            let t1 = -b + root_term;
+            // TODO eli: these masks might be better as wideu32; need to simplify them
+            let mask0 = discrmask & t0.gt(WideF32::from(TOLERANCE)) & t0.lt(hit_dist);
+            let mask1 = discrmask & t1.gt(WideF32::from(TOLERANCE)) & t1.lt(hit_dist);
+
+            // t0 if hit, else t1
+            let t = WideF32::select(t1, t0, mask0);
+            let mask = mask0 | mask1;
+            // TODO eli: '??' needs to be some way to identify the sphere, probably need to change that access pattern
+            hit = select(hit, ??, mask);
+            hit_dist = WideF32::select(hit_dist, t, mask);
+
+            // TODO eli: conditional assign
+            // hit_dist = t;
+            // hit = Some((hit_dist, s));
         }
 
         match (hit, bounces) {
