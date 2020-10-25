@@ -11,18 +11,26 @@ use std::{
 const TOLERANCE: f32 = 0.0001;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-struct V3(f32, f32, f32);
+struct V3 {
+    x: f32,
+    y: f32,
+    z: f32,
+}
 
 impl V3 {
+    fn new(x: f32, y: f32, z: f32) -> V3 {
+        V3 { x, y, z }
+    }
+
     fn dot(self, other: V3) -> f32 {
-        self.0 * other.0 + self.1 * other.1 + self.2 * other.2
+        self.x * other.x + self.y * other.y + self.z * other.z
     }
 
     fn cross(self, other: V3) -> V3 {
-        V3(
-            self.1 * other.2 - self.2 * other.1,
-            self.2 * other.0 - self.0 * other.2,
-            self.0 * other.1 - self.1 * other.0,
+        V3::new(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x,
         )
     }
 
@@ -47,7 +55,7 @@ impl Add for V3 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        Self(self.0 + other.0, self.1 + other.1, self.2 + other.2)
+        Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
     }
 }
 
@@ -55,13 +63,13 @@ impl Add<f32> for V3 {
     type Output = Self;
 
     fn add(self, rhs: f32) -> Self {
-        Self(self.0 + rhs, self.1 + rhs, self.2 + rhs)
+        Self::new(self.x + rhs, self.y + rhs, self.z + rhs)
     }
 }
 
 impl AddAssign for V3 {
     fn add_assign(&mut self, other: Self) {
-        *self = Self(self.0 + other.0, self.1 + other.1, self.2 + other.2)
+        *self = Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
     }
 }
 
@@ -69,7 +77,7 @@ impl Div<f32> for V3 {
     type Output = Self;
 
     fn div(self, rhs: f32) -> Self {
-        Self(self.0 / rhs, self.1 / rhs, self.2 / rhs)
+        Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
 
@@ -77,7 +85,7 @@ impl Sub for V3 {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        Self(self.0 - other.0, self.1 - other.1, self.2 - other.2)
+        Self::new(self.x - other.x, self.y - other.y, self.z - other.z)
     }
 }
 
@@ -85,7 +93,7 @@ impl Sub<f32> for V3 {
     type Output = Self;
 
     fn sub(self, rhs: f32) -> Self {
-        Self(self.0 - rhs, self.1 - rhs, self.2 - rhs)
+        Self::new(self.x - rhs, self.y - rhs, self.z - rhs)
     }
 }
 
@@ -93,7 +101,7 @@ impl Mul for V3 {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        Self(self.0 * other.0, self.1 * other.1, self.2 * other.2)
+        Self::new(self.x * other.x, self.y * other.y, self.z * other.z)
     }
 }
 
@@ -101,19 +109,19 @@ impl Mul<f32> for V3 {
     type Output = Self;
 
     fn mul(self, rhs: f32) -> Self {
-        Self(self.0 * rhs, self.1 * rhs, self.2 * rhs)
+        Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
 impl MulAssign<f32> for V3 {
     fn mul_assign(&mut self, rhs: f32) {
-        *self = Self(self.0 * rhs, self.1 * rhs, self.2 * rhs)
+        *self = Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
     }
 }
 
 impl MulAssign for V3 {
     fn mul_assign(&mut self, other: Self) {
-        *self = Self(self.0 * other.0, self.1 * other.1, self.2 * other.2)
+        *self = Self::new(self.x * other.x, self.y * other.y, self.z * other.z)
     }
 }
 
@@ -134,7 +142,7 @@ impl Camera {
 
         let origin = look_from - look_at;
         let z = origin.normalize();
-        let x = V3(0.0, 0.0, 1.0).cross(z).normalize();
+        let x = V3::new(0.0, 0.0, 1.0).cross(z).normalize();
         let y = z.cross(x).normalize();
 
         let film_height = 1.0;
@@ -251,8 +259,8 @@ fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &
 }
 
 fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut bounces: u32) -> V3 {
-    let mut color = V3(0.0, 0.0, 0.0);
-    let mut reflectance = V3(1.0, 1.0, 1.0);
+    let mut color = V3::new(0.0, 0.0, 0.0);
+    let mut reflectance = V3::new(1.0, 1.0, 1.0);
 
     loop {
         debug_assert!(dir.is_unit_vector());
@@ -281,7 +289,7 @@ fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut b
                         let a = randf_range(0.0, 2.0 * PI);
                         let z = randf_range(-1.0, 1.0);
                         let r = (1.0 - z * z).sqrt();
-                        V3(r * a.cos(), r * a.sin(), z)
+                        V3::new(r * a.cos(), r * a.sin(), z)
                     }
                 };
             }
@@ -317,48 +325,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Materials
     let bg = Material {
-        emit_color: V3(0.3, 0.4, 0.8),
-        reflect_color: V3(0.0, 0.0, 0.0),
+        emit_color: V3::new(0.3, 0.4, 0.8),
+        reflect_color: V3::new(0.0, 0.0, 0.0),
         t: MaterialType::Specular,
     };
     let ground = Material {
-        emit_color: V3(0.0, 0.0, 0.0),
-        reflect_color: V3(0.5, 0.5, 0.5),
+        emit_color: V3::new(0.0, 0.0, 0.0),
+        reflect_color: V3::new(0.5, 0.5, 0.5),
         t: MaterialType::Diffuse,
     };
     let left = Material {
-        emit_color: V3(0.0, 0.0, 0.0),
-        reflect_color: V3(1.0, 0.0, 0.0),
+        emit_color: V3::new(0.0, 0.0, 0.0),
+        reflect_color: V3::new(1.0, 0.0, 0.0),
         t: MaterialType::Specular,
     };
     let center = Material {
-        emit_color: V3(0.4, 0.8, 0.9),
-        reflect_color: V3(0.8, 0.8, 0.8),
+        emit_color: V3::new(0.4, 0.8, 0.9),
+        reflect_color: V3::new(0.8, 0.8, 0.8),
         t: MaterialType::Specular,
     };
     let right = Material {
-        emit_color: V3(0.0, 0.0, 0.0),
-        reflect_color: V3(0.95, 0.95, 0.95),
+        emit_color: V3::new(0.0, 0.0, 0.0),
+        reflect_color: V3::new(0.95, 0.95, 0.95),
         t: MaterialType::Specular,
     };
 
     let spheres = vec![
-        Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground),
-        Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center),
-        Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()),
-        Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
-        Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left),
-        Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right),
+        Sphere::new(V3::new(0.0, 0.0, -100.0), 100.0, ground),
+        Sphere::new(V3::new(0.0, 0.0, 1.0), 1.0, center),
+        Sphere::new(V3::new(-2.0, -3.0, 1.5), 0.3, right.clone()),
+        Sphere::new(V3::new(-3.0, -6.0, 0.0), 0.3, right.clone()),
+        Sphere::new(V3::new(-3.0, -5.0, 2.0), 0.5, left),
+        Sphere::new(V3::new(3.0, -3.0, 0.8), 1.0, right),
     ];
 
     let width = 1920;
     let height = 1080;
     let inv_width = 1.0 / (width as f32 - 1.0);
     let inv_height = 1.0 / (height as f32 - 1.0);
-    let mut pixels = vec![V3(0.0, 0.0, 0.0); width * height];
+    let mut pixels = vec![V3::new(0.0, 0.0, 0.0); width * height];
     let cam = Camera::new(
-        V3(0.0, -10.0, 1.0),
-        V3(0.0, 0.0, 0.0),
+        V3::new(0.0, -10.0, 1.0),
+        V3::new(0.0, 0.0, 0.0),
         width as f32 / height as f32,
     );
 
@@ -398,9 +406,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
         for p in &pixels {
             let c = *p / rays_shot as f32;
-            buf.push((255.0 * linear_to_srgb(c.0)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.1)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.2)) as u8);
+            buf.push((255.0 * linear_to_srgb(c.x)) as u8);
+            buf.push((255.0 * linear_to_srgb(c.y)) as u8);
+            buf.push((255.0 * linear_to_srgb(c.z)) as u8);
         }
 
         let f = format!("{}-{}", b, filename);
