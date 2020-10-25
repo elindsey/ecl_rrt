@@ -464,13 +464,11 @@ fn raycast(
             // TODO eli: move -b redundancy out
             let t0 = -b - root_term;
             let t1 = -b + root_term;
-            // TODO eli: these masks might be better as wideu32; need to simplify them
-            let mask0 = discrmask & t0.gt(WideF32::from(TOLERANCE)) & t0.lt(hit_dist);
-            let mask1 = discrmask & t1.gt(WideF32::from(TOLERANCE)) & t1.lt(hit_dist);
 
             // t0 if hit, else t1
-            let t = WideF32::select(t1, t0, mask0);
-            let mask = mask0 | mask1;
+            let t = WideF32::select(t1, t0, t0.gt(WideF32::from(TOLERANCE)));
+            // TODO eli: these masks might be better as wideu32
+            let mask = discrmask & t.gt(WideF32::from(TOLERANCE)) & t.lt(hit_dist);
             // TODO eli: '??' needs to be some way to identify the sphere, probably need to change that access pattern
             hit = select(hit, ??, mask);
             hit_dist = WideF32::select(hit_dist, t, mask);
