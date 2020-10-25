@@ -1,3 +1,5 @@
+//#![feature(link_llvm_intrinsics)]
+
 use pico_args::Arguments;
 use rayon::prelude::*;
 use std::{
@@ -16,6 +18,11 @@ use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+//extern "C" {
+//    #[link_name = "llvm.cos.v8f32"]
+//    fn cos(a: WideF32) -> WideF32;
+//}
+
 //#[cfg(all(
 //    any(target_arch = "x86", target_arch = "x86_64"),
 //    target_feature = "avx2"
@@ -25,6 +32,26 @@ struct V3(f32, f32, f32);
 
 #[derive(Debug, Copy, Clone)]
 struct WideF32(__m256);
+
+impl WideF32 {
+    //fn abs(&self) -> Self {
+    //}
+
+    fn cos(&self) -> Self {
+        // TODO eli: implement this
+        //unsafe { cos(self) }
+        self.clone()
+    }
+
+    fn sin(&self) -> Self {
+        // TODO eli: implement this
+        self.clone()
+    }
+
+    fn sqrt(&self) -> Self {
+        Self(_mm256_sqrt_ps(self.0))
+    }
+}
 
 impl From<f32> for WideF32 {
     fn from(x: f32) -> Self {
@@ -173,9 +200,9 @@ impl WideV3 {
     }
 
     // TODO eli: lanebool
-    fn is_unit_vector(self) -> bool {
-        (self.dot(self) - WideF32::from(1.0)).abs() < TOLERANCE
-    }
+    //fn is_unit_vector(self) -> bool {
+    //    (self.dot(self) - WideF32::from(1.0)).abs() < TOLERANCE
+    //}
 }
 
 impl Add for WideV3 {
