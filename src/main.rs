@@ -4,7 +4,7 @@ use std::{
     cell::Cell,
     cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, BitXorAssign, Div, Mul, MulAssign, Shl, Shr, Sub},
+    ops::{Add, AddAssign, BitOr, BitXorAssign, Div, Mul, MulAssign, Shl, Shr, Sub},
     time::Instant,
 };
 
@@ -85,6 +85,19 @@ impl MulAssign for WideF32 {
 #[derive(Debug, Copy, Clone)]
 struct WideU32(__m256i);
 
+impl From<i32> for WideU32 {
+    fn from(x: i32) -> Self {
+        Self(_mm256_set1_epi32(x))
+    }
+}
+
+impl From<&[u8; 32]> for WideU32 {
+    fn from(x: &[u8; 32]) -> Self {
+        // TODO eli: I should probably just use bytemuck
+        Self(unsafe { std::mem::transmute(x.as_ptr()) })
+    }
+}
+
 impl Shl<i32> for WideU32 {
     type Output = Self;
 
@@ -98,6 +111,14 @@ impl Shr<i32> for WideU32 {
 
     fn shr(self, shift: i32) -> Self {
         Self(_mm256_srli_epi32(self.0, shift))
+    }
+}
+
+impl BitOr for WideU32 {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(_mm256_or_si256(self.0, other.0))
     }
 }
 
@@ -328,8 +349,8 @@ fn pcg(state: &mut u64) -> u32 {
 fn randf() -> WideF32 {
     THREAD_RNG.with(|rng_cell| {
         let mut state = rng_cell.get();
-        let randu = (pcg(&mut state) >> 9) | 0x3f800000;
-        let randf = f32::from_bits(randu) - 1.0;
+        let randu = (xorshift(&mut state) >> 9) | WideU32::from(0x3f800000);
+        let randf = WideF32(unsafe { std::mem::transmute(randu.0) }) - WideF32::from(1.0);
         rng_cell.set(state);
         WideF32::from(randf)
     })
@@ -424,10 +445,11 @@ fn raycast(
 }
 
 thread_local! {
-    static THREAD_RNG: Cell<u64> = {
-        let mut buf = [0u8; 8];
+    // TODO eli: this probably needs to be a refcell now
+    static THREAD_RNG: Cell<WideU32> = {
+        let mut buf = [0u8; 32];
         getrandom::getrandom(&mut buf).unwrap();
-        Cell::new(u64::from_le_bytes(buf))
+        Cell::new(WideU32::from(&buf))
     };
 }
 
