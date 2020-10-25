@@ -51,6 +51,14 @@ impl WideF32 {
     fn sqrt(&self) -> Self {
         Self(_mm256_sqrt_ps(self.0))
     }
+
+    fn gt(&self, other: Self) -> Self {
+        Self(_mm256_cmp_ps(self.0, other.0, _CMP_GT_OQ))
+    }
+
+    fn lt(&self, other: Self) -> Self {
+        Self(_mm256_cmp_ps(self.0, other.0, _CMP_LT_OQ))
+    }
 }
 
 impl From<f32> for WideF32 {
@@ -338,14 +346,18 @@ struct Material {
 }
 
 struct Sphere {
-    p: V3,
-    rsqrd: f32,
+    p: WideV3,
+    rsqrd: WideF32,
     m: Material,
 }
 
 impl Sphere {
     fn new(p: V3, r: f32, m: Material) -> Sphere {
-        Sphere { p, rsqrd: r * r, m }
+        Sphere {
+            p: WideV3::new_bcast(p.0, p.1, p.2),
+            rsqrd: WideF32::from(r * r),
+            m,
+        }
     }
 }
 
@@ -385,7 +397,7 @@ fn randf() -> WideF32 {
     THREAD_RNG.with(|rng_cell| {
         let mut state = rng_cell.get();
         let randu = (xorshift(&mut state) >> 9) | WideU32::from(0x3f800000);
-        let randf = WideF32(unsafe { std::mem::transmute(randu.0) }) - WideF32::from(1.0);
+        let randf = WideF32(_mm256_castsi256_ps(randu.0)) - WideF32::from(1.0);
         rng_cell.set(state);
         WideF32::from(randf)
     })
