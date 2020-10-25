@@ -4,7 +4,7 @@ use std::{
     cell::Cell,
     cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, Div, Mul, MulAssign, Sub},
+    ops::{Add, AddAssign, BitXorAssign, Div, Mul, MulAssign, Shl, Shr, Sub},
     time::Instant,
 };
 
@@ -79,6 +79,31 @@ impl Mul for WideF32 {
 impl MulAssign for WideF32 {
     fn mul_assign(&mut self, other: Self) {
         self.0 = _mm256_mul_ps(self.0, other.0)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct WideU32(__m256i);
+
+impl Shl<i32> for WideU32 {
+    type Output = Self;
+
+    fn shl(self, shift: i32) -> Self {
+        Self(_mm256_slli_epi32(self.0, shift))
+    }
+}
+
+impl Shr<i32> for WideU32 {
+    type Output = Self;
+
+    fn shr(self, shift: i32) -> Self {
+        Self(_mm256_srli_epi32(self.0, shift))
+    }
+}
+
+impl BitXorAssign for WideU32 {
+    fn bitxor_assign(&mut self, other: Self) {
+        self.0 = _mm256_xor_si256(self.0, other.0)
     }
 }
 
@@ -281,6 +306,17 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
+// Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
+fn xorshift(state: &mut WideU32) -> WideU32 {
+    //debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
 // pcg xsh rs 64/32 (mcg)
 fn pcg(state: &mut u64) -> u32 {
     let s = *state;
@@ -478,6 +514,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut i = i * WIDTH;
             let xs: [f32; WIDTH];
             let ys: [f32; WIDTH];
+            // TODO eli: this is terrible
             for idx in 0..WIDTH {
                 xs[idx] = (i % width) as f32;
                 ys[idx] = (height - (i / width) - 1) as f32;
