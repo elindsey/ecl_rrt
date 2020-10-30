@@ -4,11 +4,163 @@ use std::{
     cell::Cell,
     cmp,
     f32::consts::PI,
-    ops::{Add, AddAssign, Div, Mul, MulAssign, Sub},
+    ops::Neg,
+    ops::{Add, AddAssign, BitAnd, BitOr, Div, Mul, MulAssign, Sub},
     time::Instant,
 };
 
 const TOLERANCE: f32 = 0.0001;
+
+#[cfg(target_arch = "x86")]
+use std::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+struct Spheres {
+    // TODO(eli): saving a vec of ids is silly
+    ids: Vec<f32>,
+    // TODO(eli): must ensure all of these are size of simd width
+    xs: Vec<f32>,
+    ys: Vec<f32>,
+    zs: Vec<f32>,
+    rsqrds: Vec<f32>,
+    mats: Vec<Material>,
+}
+
+impl Spheres {
+    fn new() -> Self {
+        Self {
+            ids: Vec::new(),
+            xs: Vec::new(),
+            ys: Vec::new(),
+            zs: Vec::new(),
+            rsqrds: Vec::new(),
+            mats: Vec::new(),
+        }
+    }
+
+    fn push_sphere(&mut self, s: Sphere) {
+        self.ids.push(s.id as f32);
+        self.xs.push(s.p.0);
+        self.ys.push(s.p.1);
+        self.zs.push(s.p.2);
+        self.rsqrds.push(s.rsqrd);
+        self.mats.push(s.m);
+    }
+
+    fn len(&self) -> usize {
+        self.xs.len()
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct WideF32(__m256);
+
+impl WideF32 {
+    const WIDTH: usize = 8;
+
+    fn newfromptr(x: &[f32]) -> Self {
+        Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
+    }
+
+    fn new(x: [f32; 8]) -> Self {
+        // TODO(eli): is this properly aligned?
+        Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
+    }
+
+    fn any(&self) -> bool {
+        let m = unsafe { _mm256_movemask_ps(self.0) };
+        m != 0
+    }
+
+    fn splat(x: f32) -> Self {
+        Self(unsafe { _mm256_set1_ps(x) })
+    }
+
+    fn select(x: WideF32, y: WideF32, mask: WideF32) -> WideF32 {
+        WideF32(unsafe { _mm256_blendv_ps(x.0, y.0, mask.0) })
+    }
+
+    fn sqrt(&self) -> Self {
+        Self(unsafe { _mm256_sqrt_ps(self.0) })
+    }
+
+    fn gt(&self, other: Self) -> Self {
+        Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_GT_OQ) })
+    }
+
+    fn lt(&self, other: Self) -> Self {
+        Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_LT_OQ) })
+    }
+}
+
+impl Add for WideF32 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(unsafe { _mm256_add_ps(self.0, other.0) })
+    }
+}
+
+impl AddAssign for WideF32 {
+    fn add_assign(&mut self, other: Self) {
+        self.0 = unsafe { _mm256_add_ps(self.0, other.0) }
+    }
+}
+
+impl BitAnd for WideF32 {
+    type Output = Self;
+
+    fn bitand(self, other: Self) -> Self {
+        Self(unsafe { _mm256_and_ps(self.0, other.0) })
+    }
+}
+
+impl BitOr for WideF32 {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(unsafe { _mm256_or_ps(self.0, other.0) })
+    }
+}
+
+impl Div for WideF32 {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self {
+        Self(unsafe { _mm256_div_ps(self.0, other.0) })
+    }
+}
+
+impl Sub for WideF32 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self(unsafe { _mm256_sub_ps(self.0, other.0) })
+    }
+}
+
+impl Mul for WideF32 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        Self(unsafe { _mm256_mul_ps(self.0, other.0) })
+    }
+}
+
+impl MulAssign for WideF32 {
+    fn mul_assign(&mut self, other: Self) {
+        self.0 = unsafe { _mm256_mul_ps(self.0, other.0) }
+    }
+}
+
+impl Neg for WideF32 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self(unsafe { _mm256_xor_ps(self.0, _mm256_set1_ps(-0.0)) })
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct V3(f32, f32, f32);
@@ -167,14 +319,20 @@ struct Material {
 }
 
 struct Sphere {
+    id: usize,
     p: V3,
     rsqrd: f32,
     m: Material,
 }
 
 impl Sphere {
-    fn new(p: V3, r: f32, m: Material) -> Sphere {
-        Sphere { p, rsqrd: r * r, m }
+    fn new(id: usize, p: V3, r: f32, m: Material) -> Sphere {
+        Sphere {
+            id,
+            p,
+            rsqrd: r * r,
+            m,
+        }
     }
 }
 
@@ -212,69 +370,96 @@ fn randf_range(min: f32, max: f32) -> f32 {
     min + (max - min) * randf()
 }
 
-fn intersect_world(spheres: &Vec<Sphere>, origin: V3, dir: V3) -> Option<(f32, &Sphere)> {
-    let mut hit = None;
-    let mut hit_dist = f32::MAX;
-
-    for s in spheres {
-        let sphere_relative_origin = origin - s.p;
-        let b = dir.dot(sphere_relative_origin);
-        let c = sphere_relative_origin.dot(sphere_relative_origin) - s.rsqrd;
-        let discr = b * b - c;
-
-        // at least one real root, meaning we've hit the sphere
-        if discr > 0.0 {
-            let root_term = discr.sqrt();
-            // Order here matters. root_term is positive; b may be positive or negative
-            //
-            // If b is negative, -b is positive, so -b + root_term is _more_ positive than -b - root_term
-            // Thus we check -b - root_term first; if it's negative, we check -b + root_term. This is why -b - root_term
-            // must be first.
-            //
-            // Second case is less interesting
-            // If b is positive, -b is negative, so -b - root_term is more negative and we will then check -b + root_term
-            let t = -b - root_term; // -b minus positive
-            if t > TOLERANCE && t < hit_dist {
-                hit_dist = t;
-                hit = Some((hit_dist, s));
-                continue;
-            }
-            let t = -b + root_term; // -b plus positive
-            if t > TOLERANCE && t < hit_dist {
-                hit_dist = t;
-                hit = Some((hit_dist, s));
-                continue;
-            }
-        }
-    }
-    hit
-}
-
-fn cast(bg: &Material, spheres: &Vec<Sphere>, mut origin: V3, mut dir: V3, mut bounces: u32) -> V3 {
+fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounces: u32) -> V3 {
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
 
     loop {
         debug_assert!(dir.is_unit_vector());
-        let hit = intersect_world(spheres, origin, dir);
+        let ox = WideF32::splat(origin.0);
+        let oy = WideF32::splat(origin.1);
+        let oz = WideF32::splat(origin.2);
+        let mut hit = None;
+        let mut hits = WideF32::splat(f32::MAX);
+        let mut hit_dists = WideF32::splat(f32::MAX);
+
+        let dirx = WideF32::splat(dir.0);
+        let diry = WideF32::splat(dir.1);
+        let dirz = WideF32::splat(dir.2);
+
+        for i in (0..spheres.len()).step_by(WideF32::WIDTH) {
+            let wide_xs = WideF32::newfromptr(&spheres.xs[i..i + WideF32::WIDTH]);
+            let wide_ys = WideF32::newfromptr(&spheres.ys[i..i + WideF32::WIDTH]);
+            let wide_zs = WideF32::newfromptr(&spheres.zs[i..i + WideF32::WIDTH]);
+            let wide_rsqrds = WideF32::newfromptr(&spheres.rsqrds[i..i + WideF32::WIDTH]);
+            let wide_ids = WideF32::newfromptr(&spheres.ids[i..i + WideF32::WIDTH]);
+
+            let sphere_relative_x = wide_xs - ox;
+            let sphere_relative_y = wide_ys - oy;
+            let sphere_relative_z = wide_zs - oz;
+            let neg_b =
+                dirx * sphere_relative_x + diry * sphere_relative_y + dirz * sphere_relative_z;
+            let c = sphere_relative_x * sphere_relative_x
+                + sphere_relative_y * sphere_relative_y
+                + sphere_relative_z * sphere_relative_z
+                - wide_rsqrds;
+            let discr = neg_b * neg_b - c;
+
+            // at least one real root, meaning we've hit the sphere
+            let discrmask = discr.gt(WideF32::splat(0.0));
+            if discrmask.any() {
+                let root_term = discr.sqrt();
+                let t0 = neg_b - root_term;
+                let t1 = neg_b + root_term;
+
+                // t0 if hit, else t1
+                let t = WideF32::select(t1, t0, t0.gt(WideF32::splat(TOLERANCE)));
+                // TODO eli: these masks might be better as wideu32
+                let mask = discrmask & t.gt(WideF32::splat(TOLERANCE)) & t.lt(hit_dists);
+                hits = WideF32::select(hits, wide_ids, mask);
+                hit_dists = WideF32::select(hit_dists, t, mask);
+            }
+        }
+        // TODO(eli): hmin, find closest of eight potential hits; simd this too, it's crazy slow
+        if hit_dists.lt(WideF32::splat(f32::MAX)).any() {
+            let hit_ids_arr: [f32; 8] = unsafe { std::mem::transmute(hits.0) };
+            let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
+
+            let mut min = f32::MAX;
+            let mut minid = f32::MAX;
+            for i in 0..8 {
+                if hit_dists_arr[i] < min {
+                    minid = hit_ids_arr[i];
+                    min = hit_dists_arr[i];
+                }
+            }
+
+            hit = Some((min, minid));
+        }
+
         match (hit, bounces) {
             (None, _) => {
                 color += reflectance * bg.emit_color;
                 break;
             }
-            (Some((_, s)), 0) => {
-                color += reflectance * s.m.emit_color;
+            (Some((_, id)), 0) => {
+                color += reflectance * spheres.mats[id as usize].emit_color;
                 break;
             }
-            (Some((hit_dist, s)), _) => {
+            (Some((hit_dist, id)), _) => {
                 bounces -= 1;
-                color += reflectance * s.m.emit_color;
-                reflectance *= s.m.reflect_color;
+                color += reflectance * spheres.mats[id as usize].emit_color;
+                reflectance *= spheres.mats[id as usize].reflect_color;
                 let hit_point = origin + dir * hit_dist;
                 origin = hit_point;
-                dir = match s.m.t {
+                dir = match spheres.mats[id as usize].t {
                     MaterialType::Specular => {
-                        let hit_normal = (hit_point - s.p).normalize();
+                        let sp = V3(
+                            spheres.xs[id as usize],
+                            spheres.ys[id as usize],
+                            spheres.zs[id as usize],
+                        );
+                        let hit_normal = (hit_point - sp).normalize();
                         dir.reflect(hit_normal)
                     }
                     MaterialType::Diffuse => {
@@ -342,14 +527,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         t: MaterialType::Specular,
     };
 
-    let spheres = vec![
-        Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground),
-        Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center),
-        Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()),
-        Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
-        Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left),
-        Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right),
-    ];
+    // TODO(eli): convert to soa
+    let mut spheres = Spheres::new();
+    spheres.push_sphere(Sphere::new(0, V3(0.0, 0.0, -100.0), 100.0, ground));
+    spheres.push_sphere(Sphere::new(1, V3(0.0, 0.0, 1.0), 1.0, center));
+    spheres.push_sphere(Sphere::new(2, V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
+    spheres.push_sphere(Sphere::new(3, V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
+    spheres.push_sphere(Sphere::new(4, V3(-3.0, -5.0, 2.0), 0.5, left.clone()));
+    spheres.push_sphere(Sphere::new(5, V3(3.0, -3.0, 0.8), 1.0, right.clone()));
+    spheres.push_sphere(Sphere::new(6, V3(-3.0, -3.0, 2.0), 0.5, left));
+    spheres.push_sphere(Sphere::new(7, V3(5.0, -3.0, 0.8), 1.0, right));
 
     let width = 1920;
     let height = 1080;
