@@ -17,7 +17,6 @@ use std::arch::x86::*;
 use std::arch::x86_64::*;
 
 struct Spheres {
-    // TODO(eli): must ensure all of these are size of simd width
     xs: Vec<f32>,
     ys: Vec<f32>,
     zs: Vec<f32>,
@@ -26,22 +25,39 @@ struct Spheres {
 }
 
 impl Spheres {
-    fn new() -> Self {
-        Self {
-            xs: Vec::new(),
-            ys: Vec::new(),
-            zs: Vec::new(),
-            rsqrds: Vec::new(),
-            mats: Vec::new(),
-        }
-    }
+    fn new(spheres: Vec<Sphere>) -> Self {
+        let len = (spheres.len() + WideF32::WIDTH - 1) / WideF32::WIDTH * WideF32::WIDTH;
 
-    fn push_sphere(&mut self, s: Sphere) {
-        self.xs.push(s.p.0);
-        self.ys.push(s.p.1);
-        self.zs.push(s.p.2);
-        self.rsqrds.push(s.rsqrd);
-        self.mats.push(s.m);
+        let mut me = Self {
+            xs: Vec::with_capacity(len),
+            ys: Vec::with_capacity(len),
+            zs: Vec::with_capacity(len),
+            rsqrds: Vec::with_capacity(len),
+            mats: Vec::with_capacity(len),
+        };
+
+        for s in spheres {
+            me.xs.push(s.p.0);
+            me.ys.push(s.p.1);
+            me.zs.push(s.p.2);
+            me.rsqrds.push(s.rsqrd);
+            me.mats.push(s.m);
+        }
+
+        // pad everything out to the simd width
+        me.xs.resize(len, 0.0);
+        me.ys.resize(len, 0.0);
+        me.zs.resize(len, 0.0);
+        me.rsqrds.resize(len, 0.0);
+
+        let default_mat = Material {
+            emit_color: V3(0.0, 0.0, 0.0),
+            reflect_color: V3(0.0, 0.0, 0.0),
+            t: MaterialType::Specular,
+        };
+        me.mats.resize(len, default_mat);
+
+        me
     }
 
     fn len(&self) -> usize {
@@ -518,16 +534,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         t: MaterialType::Specular,
     };
 
-    // TODO(eli): convert to soa
-    let mut spheres = Spheres::new();
-    spheres.push_sphere(Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground));
-    spheres.push_sphere(Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center));
-    spheres.push_sphere(Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
-    spheres.push_sphere(Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
-    spheres.push_sphere(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left.clone()));
-    spheres.push_sphere(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right.clone()));
-    spheres.push_sphere(Sphere::new(V3(-3.0, -3.0, 2.0), 0.5, left));
-    spheres.push_sphere(Sphere::new(V3(5.0, -3.0, 0.8), 1.0, right));
+    let spheres = Spheres::new(vec![
+        Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground),
+        Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center),
+        Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
+        Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left.clone()),
+        Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right.clone()),
+        Sphere::new(V3(-3.0, -3.0, 2.0), 0.5, left),
+        //Sphere::new(V3(5.0, -3.0, 0.8), 1.0, right),
+    ]);
 
     let width = 1920;
     let height = 1080;
