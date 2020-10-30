@@ -17,8 +17,6 @@ use std::arch::x86::*;
 use std::arch::x86_64::*;
 
 struct Spheres {
-    // TODO(eli): saving a vec of ids is silly
-    ids: Vec<f32>,
     // TODO(eli): must ensure all of these are size of simd width
     xs: Vec<f32>,
     ys: Vec<f32>,
@@ -30,7 +28,6 @@ struct Spheres {
 impl Spheres {
     fn new() -> Self {
         Self {
-            ids: Vec::new(),
             xs: Vec::new(),
             ys: Vec::new(),
             zs: Vec::new(),
@@ -40,7 +37,6 @@ impl Spheres {
     }
 
     fn push_sphere(&mut self, s: Sphere) {
-        self.ids.push(s.id as f32);
         self.xs.push(s.p.0);
         self.ys.push(s.p.1);
         self.zs.push(s.p.2);
@@ -63,9 +59,8 @@ impl WideF32 {
         Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
     }
 
-    fn new(x: [f32; 8]) -> Self {
-        // TODO(eli): is this properly aligned?
-        Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
+    fn new(e7: f32, e6: f32, e5: f32, e4: f32, e3: f32, e2: f32, e1: f32, e0: f32) -> Self {
+        Self(unsafe { _mm256_set_ps(e7, e6, e5, e4, e3, e2, e1, e0) })
     }
 
     fn any(&self) -> bool {
@@ -319,20 +314,14 @@ struct Material {
 }
 
 struct Sphere {
-    id: usize,
     p: V3,
     rsqrd: f32,
     m: Material,
 }
 
 impl Sphere {
-    fn new(id: usize, p: V3, r: f32, m: Material) -> Sphere {
-        Sphere {
-            id,
-            p,
-            rsqrd: r * r,
-            m,
-        }
+    fn new(p: V3, r: f32, m: Material) -> Sphere {
+        Sphere { p, rsqrd: r * r, m }
     }
 }
 
@@ -386,13 +375,14 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
         let dirx = WideF32::splat(dir.0);
         let diry = WideF32::splat(dir.1);
         let dirz = WideF32::splat(dir.2);
+        let mut wide_ids = WideF32::new(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0);
 
+        // TODO(eli): if this is a zip zip zip zip plus enumerate, can I avoid bounds checks?
         for i in (0..spheres.len()).step_by(WideF32::WIDTH) {
             let wide_xs = WideF32::newfromptr(&spheres.xs[i..i + WideF32::WIDTH]);
             let wide_ys = WideF32::newfromptr(&spheres.ys[i..i + WideF32::WIDTH]);
             let wide_zs = WideF32::newfromptr(&spheres.zs[i..i + WideF32::WIDTH]);
             let wide_rsqrds = WideF32::newfromptr(&spheres.rsqrds[i..i + WideF32::WIDTH]);
-            let wide_ids = WideF32::newfromptr(&spheres.ids[i..i + WideF32::WIDTH]);
 
             let sphere_relative_x = wide_xs - ox;
             let sphere_relative_y = wide_ys - oy;
@@ -419,6 +409,7 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
                 hits = WideF32::select(hits, wide_ids, mask);
                 hit_dists = WideF32::select(hit_dists, t, mask);
             }
+            wide_ids += WideF32::splat(WideF32::WIDTH as f32);
         }
         // TODO(eli): hmin, find closest of eight potential hits; simd this too, it's crazy slow
         if hit_dists.lt(WideF32::splat(f32::MAX)).any() {
@@ -529,14 +520,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TODO(eli): convert to soa
     let mut spheres = Spheres::new();
-    spheres.push_sphere(Sphere::new(0, V3(0.0, 0.0, -100.0), 100.0, ground));
-    spheres.push_sphere(Sphere::new(1, V3(0.0, 0.0, 1.0), 1.0, center));
-    spheres.push_sphere(Sphere::new(2, V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
-    spheres.push_sphere(Sphere::new(3, V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
-    spheres.push_sphere(Sphere::new(4, V3(-3.0, -5.0, 2.0), 0.5, left.clone()));
-    spheres.push_sphere(Sphere::new(5, V3(3.0, -3.0, 0.8), 1.0, right.clone()));
-    spheres.push_sphere(Sphere::new(6, V3(-3.0, -3.0, 2.0), 0.5, left));
-    spheres.push_sphere(Sphere::new(7, V3(5.0, -3.0, 0.8), 1.0, right));
+    spheres.push_sphere(Sphere::new(V3(0.0, 0.0, -100.0), 100.0, ground));
+    spheres.push_sphere(Sphere::new(V3(0.0, 0.0, 1.0), 1.0, center));
+    spheres.push_sphere(Sphere::new(V3(-2.0, -3.0, 1.5), 0.3, right.clone()));
+    spheres.push_sphere(Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()));
+    spheres.push_sphere(Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left.clone()));
+    spheres.push_sphere(Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right.clone()));
+    spheres.push_sphere(Sphere::new(V3(-3.0, -3.0, 2.0), 0.5, left));
+    spheres.push_sphere(Sphere::new(V3(5.0, -3.0, 0.8), 1.0, right));
 
     let width = 1920;
     let height = 1080;
