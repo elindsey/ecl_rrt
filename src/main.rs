@@ -71,7 +71,10 @@ struct WideF32(__m256);
 impl WideF32 {
     const WIDTH: usize = 8;
 
-    fn newfromptr(x: &[f32]) -> Self {
+    fn load(x: &[f32]) -> Self {
+        assert!(x.len() >= Self::WIDTH);
+        // aligning this would require some hoops on vec alloc
+        // https://stackoverflow.com/questions/60180121/how-do-i-allocate-a-vecu8-that-is-aligned-to-the-size-of-the-cache-line
         Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
     }
 
@@ -391,14 +394,15 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
         let dirx = WideF32::splat(dir.0);
         let diry = WideF32::splat(dir.1);
         let dirz = WideF32::splat(dir.2);
+        // TODO(eli): should be a wideu32
         let mut wide_ids = WideF32::new(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0);
 
-        // TODO(eli): if this is a zip zip zip zip plus enumerate, can I avoid bounds checks?
+        // TODO(eli): egregious bounds checking here
         for i in (0..spheres.len()).step_by(WideF32::WIDTH) {
-            let wide_xs = WideF32::newfromptr(&spheres.xs[i..i + WideF32::WIDTH]);
-            let wide_ys = WideF32::newfromptr(&spheres.ys[i..i + WideF32::WIDTH]);
-            let wide_zs = WideF32::newfromptr(&spheres.zs[i..i + WideF32::WIDTH]);
-            let wide_rsqrds = WideF32::newfromptr(&spheres.rsqrds[i..i + WideF32::WIDTH]);
+            let wide_xs = WideF32::load(&spheres.xs[i..i + WideF32::WIDTH]);
+            let wide_ys = WideF32::load(&spheres.ys[i..i + WideF32::WIDTH]);
+            let wide_zs = WideF32::load(&spheres.zs[i..i + WideF32::WIDTH]);
+            let wide_rsqrds = WideF32::load(&spheres.rsqrds[i..i + WideF32::WIDTH]);
 
             let sphere_relative_x = wide_xs - ox;
             let sphere_relative_y = wide_ys - oy;
@@ -420,7 +424,7 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
 
                 // t0 if hit, else t1
                 let t = WideF32::select(t1, t0, t0.gt(WideF32::splat(TOLERANCE)));
-                // TODO eli: these masks might be better as wideu32
+                // TODO(eli): it would be better to represent masks as a custom type or a wideu32
                 let mask = discrmask & t.gt(WideF32::splat(TOLERANCE)) & t.lt(hit_dists);
                 hits = WideF32::select(hits, wide_ids, mask);
                 hit_dists = WideF32::select(hit_dists, t, mask);
@@ -441,7 +445,7 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
                 }
             }
 
-            hit = Some((min, minid));
+            hit = Some((min, minid as usize));
         }
 
         match (hit, bounces) {
@@ -450,22 +454,19 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
                 break;
             }
             (Some((_, id)), 0) => {
-                color += reflectance * spheres.mats[id as usize].emit_color;
+                color += reflectance * spheres.mats[id].emit_color;
                 break;
             }
             (Some((hit_dist, id)), _) => {
                 bounces -= 1;
-                color += reflectance * spheres.mats[id as usize].emit_color;
-                reflectance *= spheres.mats[id as usize].reflect_color;
+                let mat = &spheres.mats[id];
+                color += reflectance * mat.emit_color;
+                reflectance *= mat.reflect_color;
                 let hit_point = origin + dir * hit_dist;
                 origin = hit_point;
-                dir = match spheres.mats[id as usize].t {
+                dir = match mat.t {
                     MaterialType::Specular => {
-                        let sp = V3(
-                            spheres.xs[id as usize],
-                            spheres.ys[id as usize],
-                            spheres.zs[id as usize],
-                        );
+                        let sp = V3(spheres.xs[id], spheres.ys[id], spheres.zs[id]);
                         let hit_normal = (hit_point - sp).normalize();
                         dir.reflect(hit_normal)
                     }
