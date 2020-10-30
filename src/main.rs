@@ -83,8 +83,20 @@ impl WideF32 {
     }
 
     fn any(&self) -> bool {
-        let m = unsafe { _mm256_movemask_ps(self.0) };
-        m != 0
+        (unsafe { _mm256_movemask_ps(self.0) }) != 0
+    }
+
+    fn hmin(&self) -> f32 {
+        // https://stackoverflow.com/questions/9795529/how-to-find-the-horizontal-maximum-in-a-256-bit-avx-vector
+        // https://stackoverflow.com/questions/49941645/get-sum-of-values-stored-in-m256d-with-sse-avx/49943540#49943540
+        unsafe {
+            let x = self.0;
+            let y = _mm256_permute2f128_ps(x, x, 1);
+            let m1 = _mm256_min_ps(x, y);
+            let m2 = _mm256_permute_ps(m1, 5);
+            let m = _mm256_min_ps(m1, m2);
+            _mm256_cvtss_f32(m)
+        }
     }
 
     fn splat(x: f32) -> Self {
@@ -105,6 +117,11 @@ impl WideF32 {
 
     fn lt(&self, other: Self) -> Self {
         Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_LT_OQ) })
+    }
+
+    fn eq(&self, other: Self) -> Self {
+        // can I just use _mm256_cmpeq_epi32 ?
+        Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_EQ_OQ) })
     }
 }
 
@@ -432,20 +449,19 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
             wide_ids += WideF32::splat(WideF32::WIDTH as f32);
         }
         // TODO(eli): hmin, find closest of eight potential hits; simd this too, it's crazy slow
-        if hit_dists.lt(WideF32::splat(f32::MAX)).any() {
+        let hmin = hit_dists.hmin();
+        if hmin < f32::MAX {
+            // I can use movemask_ps to pack the mask into a smaller int, and then I can directly index off the int
+            // alternately I can do some clz stuff to find the index offset from this mask
+            let minmask = hit_dists.eq(WideF32::splat(hmin));
+            // m can't be used as an index directly; it has a 1 in the position number that can be used though
+            let m = unsafe { _mm256_movemask_ps(minmask.0) };
+            let m = m.trailing_zeros();
+            //println!("{}", m);
+            //if hit_dists.lt(WideF32::splat(f32::MAX)).any() {
             let hit_ids_arr: [f32; 8] = unsafe { std::mem::transmute(hits.0) };
             let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
-
-            let mut min = f32::MAX;
-            let mut minid = f32::MAX;
-            for i in 0..8 {
-                if hit_dists_arr[i] < min {
-                    minid = hit_ids_arr[i];
-                    min = hit_dists_arr[i];
-                }
-            }
-
-            hit = Some((min, minid as usize));
+            hit = Some((hit_dists_arr[m as usize], hit_ids_arr[m as usize] as usize))
         }
 
         match (hit, bounces) {
