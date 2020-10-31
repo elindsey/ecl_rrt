@@ -87,14 +87,39 @@ impl WideF32 {
     }
 
     fn hmin(&self) -> f32 {
-        // https://stackoverflow.com/questions/9795529/how-to-find-the-horizontal-maximum-in-a-256-bit-avx-vector
-        // https://stackoverflow.com/questions/49941645/get-sum-of-values-stored-in-m256d-with-sse-avx/49943540#49943540
         unsafe {
+            /*
+            swap lanes, take min
+              1 2 3 4 5 6 7 8
+              5 6 7 8 1 2 3 4
+            = 1 2 3 4 1 2 3 4
+
+            1st permute, take min
+            3
+            2
+            1
+            0
+
+            00 01 10 11 = 27
+
+              1 2 3 4 1 2 3 4
+              4 3 2 1 4 3 2 1
+            = 1 2 2 1 1 2 2 1
+
+
+            unpackhi, take min
+            (this works only because we extract a scalar instead of a vec)
+              1 2 2 1 1 2 2 1
+              2 2 1 1 2 2 1 1
+            = 1 2 1 1 1 2 1 1
+            */
             let x = self.0;
             let y = _mm256_permute2f128_ps(x, x, 1);
             let m1 = _mm256_min_ps(x, y);
-            let m2 = _mm256_permute_ps(m1, 5);
-            let m = _mm256_min_ps(m1, m2);
+            let m2 = _mm256_permute_ps(m1, 27);
+            let m2 = _mm256_min_ps(m1, m2);
+            let m3 = _mm256_unpackhi_ps(m2, m2);
+            let m = _mm256_min_ps(m2, m3);
             _mm256_cvtss_f32(m)
         }
     }
@@ -120,7 +145,6 @@ impl WideF32 {
     }
 
     fn eq(&self, other: Self) -> Self {
-        // can I just use _mm256_cmpeq_epi32 ?
         Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_EQ_OQ) })
     }
 }
@@ -382,6 +406,7 @@ fn pcg(state: &mut u64) -> u32 {
 }
 
 fn randf() -> f32 {
+    // TODO(eli): thread local perf is terrible; causes function call and branching
     THREAD_RNG.with(|rng_cell| {
         let mut state = rng_cell.get();
         let randu = (pcg(&mut state) >> 9) | 0x3f800000;
@@ -432,7 +457,6 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
                 - wide_rsqrds;
             let discr = neg_b * neg_b - c;
 
-            // at least one real root, meaning we've hit the sphere
             let discrmask = discr.gt(WideF32::splat(0.0));
             if discrmask.any() {
                 let root_term = discr.sqrt();
@@ -448,20 +472,15 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
             }
             wide_ids += WideF32::splat(WideF32::WIDTH as f32);
         }
-        // TODO(eli): hmin, find closest of eight potential hits; simd this too, it's crazy slow
         let hmin = hit_dists.hmin();
         if hmin < f32::MAX {
-            // I can use movemask_ps to pack the mask into a smaller int, and then I can directly index off the int
-            // alternately I can do some clz stuff to find the index offset from this mask
             let minmask = hit_dists.eq(WideF32::splat(hmin));
-            // m can't be used as an index directly; it has a 1 in the position number that can be used though
             let m = unsafe { _mm256_movemask_ps(minmask.0) };
-            let m = m.trailing_zeros();
-            //println!("{}", m);
-            //if hit_dists.lt(WideF32::splat(f32::MAX)).any() {
+            let min_idx = m.trailing_zeros() as usize;
+
             let hit_ids_arr: [f32; 8] = unsafe { std::mem::transmute(hits.0) };
             let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
-            hit = Some((hit_dists_arr[m as usize], hit_ids_arr[m as usize] as usize))
+            hit = Some((hit_dists_arr[min_idx], hit_ids_arr[min_idx] as usize))
         }
 
         match (hit, bounces) {
