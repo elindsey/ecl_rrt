@@ -62,7 +62,11 @@ impl WideF32 {
     }
 
     fn any(&self) -> bool {
-        (unsafe { _mm256_movemask_ps(self.0) }) != 0
+        self.mask() != 0
+    }
+
+    fn mask(&self) -> i32 {
+        unsafe { _mm256_movemask_ps(self.0) }
     }
 
     fn hmin(&self) -> f32 {
@@ -506,13 +510,14 @@ fn cast(
         let origin_xs = WideF32::splat(origin.0);
         let origin_ys = WideF32::splat(origin.1);
         let origin_zs = WideF32::splat(origin.2);
-        let mut hits = WideI32::splat(-1);
-        let mut hit_dists = WideF32::splat(f32::MAX);
 
-        let dirx = WideF32::splat(dir.0);
-        let diry = WideF32::splat(dir.1);
-        let dirz = WideF32::splat(dir.2);
-        let mut wide_ids = WideI32::new(7, 6, 5, 4, 3, 2, 1, 0);
+        let dir_x = WideF32::splat(dir.0);
+        let dir_y = WideF32::splat(dir.1);
+        let dir_z = WideF32::splat(dir.2);
+
+        let mut hit_ids = WideI32::splat(-1);
+        let mut hit_dists = WideF32::splat(f32::MAX);
+        let mut iteration_ids = WideI32::new(7, 6, 5, 4, 3, 2, 1, 0);
 
         // TODO(eli): egregious bounds checking here
         for i in (0..spheres.len()).step_by(SIMD_WIDTH) {
@@ -526,7 +531,7 @@ fn cast(
             let relative_xs = sphere_xs - origin_xs;
             let relative_ys = sphere_ys - origin_ys;
             let relative_zs = sphere_zs - origin_zs;
-            let neg_b = dirx * relative_xs + diry * relative_ys + dirz * relative_zs;
+            let neg_b = dir_x * relative_xs + dir_y * relative_ys + dir_z * relative_zs;
             let c =
                 relative_xs * relative_xs + relative_ys * relative_ys + relative_zs * relative_zs
                     - sphere_rsqrds;
@@ -541,18 +546,17 @@ fn cast(
                 // t0 if hit, else t1
                 let t = WideF32::select(t1, t0, t0.gt(WideF32::splat(TOLERANCE)));
                 let mask = discrmask & t.gt(WideF32::splat(TOLERANCE)) & t.lt(hit_dists);
-                hits = WideI32::select(hits, wide_ids, mask);
+                hit_ids = WideI32::select(hit_ids, iteration_ids, mask);
                 hit_dists = WideF32::select(hit_dists, t, mask);
             }
-            wide_ids += WideI32::splat(SIMD_WIDTH as i32);
+            iteration_ids += WideI32::splat(SIMD_WIDTH as i32);
         }
         let hmin = hit_dists.hmin();
         if hmin < f32::MAX {
-            let minmask = hit_dists.eq(WideF32::splat(hmin));
-            let m = unsafe { _mm256_movemask_ps(minmask.0) };
-            let min_idx = m.trailing_zeros() as usize;
+            let minmask = hit_dists.eq(WideF32::splat(hmin)).mask();
+            let min_idx = minmask.trailing_zeros() as usize;
 
-            let hit_ids_arr: [i32; SIMD_WIDTH] = unsafe { std::mem::transmute(hits.0) };
+            let hit_ids_arr: [i32; SIMD_WIDTH] = unsafe { std::mem::transmute(hit_ids.0) };
             let hit_dists_arr: [f32; SIMD_WIDTH] = unsafe { std::mem::transmute(hit_dists.0) };
 
             let id = hit_ids_arr[min_idx] as usize;
