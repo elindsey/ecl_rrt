@@ -1,5 +1,6 @@
+use crossbeam_channel::unbounded;
+use crossbeam_utils::thread;
 use pico_args::Arguments;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::arch::x86_64::*;
 use std::{
     cell::Cell,
@@ -675,42 +676,122 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for b in 0..batches {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
-        pixels.par_iter_mut().enumerate().for_each_init(
-            || thread_rand(),
-            |rng_state, (i, color)| {
-                let image_x = (i % width) as f32;
-                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..batch_size {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf(rng_state);
-                    let rand_y = randf(rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+        /*
+                let mut vs = vec!["eli", "something", "whatever"];
+        let (sender, receiver) = unbounded();
+        for v in vs.chunks_mut(1) {
+            sender.send(v).unwrap();
+        }
+        drop(sender);
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
+        thread::scope(|s| {
+            let handle = s.spawn(|_| {
+                for chunk in receiver {
+                    for s in chunk {
+                        println!("{}", s);
+                    }
                 }
-            },
-        );
+            });
+            */
+
+        //let q = ArrayQueue::new(height * width);
+        //pixels.chunks_mut(1920).enumerate().for_each(|(i, chunk)| {
+        //    q.push((i, chunk)).unwrap();
+        //});
+
+        let (sender, receiver) = unbounded::<(usize, &mut [V3])>();
+        println!("spawning");
+        thread::scope(|s| {
+            for _ in 0..16 {
+                let receiver = receiver.clone();
+                let handle = s.spawn(|_| {
+                    let mut rng_state = thread_rand();
+                    for (i, chunk) in receiver {
+                        //while let Some((i, chunk)) = q.pop() {
+                        let image_y = i as f32;
+                        for (image_x, color) in chunk.into_iter().enumerate() {
+                            let image_x = image_x as f32;
+                            //for (i, color) in receiver {
+                            //let image_x = (i % width) as f32;
+                            //let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                            for _ in 0..batch_size {
+                                // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                                let rand_x = randf(&mut rng_state);
+                                let rand_y = randf(&mut rng_state);
+                                let film_x =
+                                    cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                                let film_y =
+                                    cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                                let film_p = cam.film_lower_left + film_x + film_y;
+
+                                // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                                // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                                // then add a random [0,1) float
+                                let ray_dir = (film_p - cam.origin).normalize();
+                                *color += cast(
+                                    &mut rng_state,
+                                    &bg,
+                                    &spheres,
+                                    cam.origin,
+                                    ray_dir,
+                                    bounces,
+                                );
+                            }
+                        }
+                    }
+                });
+            }
+            println!("sending");
+            pixels.chunks_mut(1920).enumerate().for_each(|(i, chunk)| {
+                sender.send((i, chunk)).unwrap();
+            });
+            //pixels.iter_mut().enumerate().for_each(|(i, color)| {
+            //    sender.send((i, color));
+            //});
+            drop(sender);
+        })
+        .unwrap();
+
+        //pixels.par_iter_mut().enumerate().for_each_init(
+        //    || thread_rand(),
+        //    |rng_state, (i, color)| {
+        //        let image_x = (i % width) as f32;
+        //        let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+        //        for _ in 0..batch_size {
+        //            // calculate ratio we've moved along the image (y/height), step proportionally within the film
+        //            let rand_x = randf(rng_state);
+        //            let rand_y = randf(rng_state);
+        //            let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+        //            let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+        //            let film_p = cam.film_lower_left + film_x + film_y;
+
+        //            // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+        //            // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+        //            // then add a random [0,1) float
+        //            let ray_dir = (film_p - cam.origin).normalize();
+        //            *color += cast(rng_state, &bg, &spheres, cam.origin, ray_dir, bounces);
+        //        }
+        //    },
+        //);
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
-
-        let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
-        for p in &pixels {
-            let c = *p / rays_shot as f32;
-            buf.push((255.0 * linear_to_srgb(c.0)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.1)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.2)) as u8);
-        }
-
-        let f = format!("{}-{}", b, filename);
-        image::save_buffer(f, &buf, width as u32, height as u32, image::ColorType::Rgb8)?;
     }
+    let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
+    for p in &pixels {
+        let c = *p / rays_shot as f32;
+        buf.push((255.0 * linear_to_srgb(c.0)) as u8);
+        buf.push((255.0 * linear_to_srgb(c.1)) as u8);
+        buf.push((255.0 * linear_to_srgb(c.2)) as u8);
+    }
+
+    //let f = format!("{}-{}", b, filename);
+    image::save_buffer(
+        "eli.png",
+        &buf,
+        width as u32,
+        height as u32,
+        image::ColorType::Rgb8,
+    )?;
     println!("Rendering took {:.3}s", start.elapsed().as_secs_f32());
     Ok(())
 }
