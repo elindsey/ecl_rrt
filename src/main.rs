@@ -1,5 +1,6 @@
 use pico_args::Arguments;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use std::arch::x86_64::*;
 use std::{
     cell::Cell,
     cmp,
@@ -11,11 +12,6 @@ use std::{
 
 const TOLERANCE: f32 = 0.0001;
 const SIMD_WIDTH: usize = 8;
-
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
 
 struct Spheres {
     xs: Vec<f32>,

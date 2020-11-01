@@ -1,2 +1,6 @@
-Port of [ecl_rt_legacy](https://github.com/elindsey/ecl_rt_legacy) to Rust.
+ecl_rt is a simple ray tracer for my rendering side projects.
+
+Note that it requires AVX2.
+
+A previous C99 version is located [here](https://github.com/elindsey/ecl_rt_legacy).
 
