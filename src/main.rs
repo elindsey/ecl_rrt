@@ -113,6 +113,22 @@ impl WideF32 {
         Self(unsafe { _mm256_sqrt_ps(self.0) })
     }
 
+    fn rsqrt(&self) -> Self {
+        Self(unsafe { _mm256_rsqrt_ps(self.0) })
+    }
+
+    // approximate a sqrt using an inverse sqrt and one iteration of Newton-Raphson
+    // https://en.wikipedia.org/wiki/Methods_of_computing_square_roots#Iterative_methods_for_reciprocal_square_roots
+    // Note: on many architectures this is significantly faster than the sqrt intrinsic. But this is not so on Skylake
+    // for this program: approx_sqrt crowds the ports with additional mul/subs so is net slower
+    fn approx_sqrt(self) -> Self {
+        let half = WideF32::splat(0.5);
+        let three = WideF32::splat(3.0);
+        let rsqrt = self.rsqrt();
+        let x = three - rsqrt * rsqrt * self;
+        rsqrt * half * x * self
+    }
+
     fn gt(&self, other: Self) -> Self {
         Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_GT_OQ) })
     }
