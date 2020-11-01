@@ -10,6 +10,7 @@ use std::{
 };
 
 const TOLERANCE: f32 = 0.0001;
+const SIMD_WIDTH: usize = 8;
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
@@ -26,7 +27,7 @@ struct Spheres {
 
 impl Spheres {
     fn new(spheres: Vec<Sphere>) -> Self {
-        let len = (spheres.len() + WideF32::WIDTH - 1) / WideF32::WIDTH * WideF32::WIDTH;
+        let len = (spheres.len() + SIMD_WIDTH - 1) / SIMD_WIDTH * SIMD_WIDTH;
 
         let mut me = Self {
             xs: Vec::with_capacity(len),
@@ -66,20 +67,51 @@ impl Spheres {
 }
 
 #[derive(Debug, Copy, Clone)]
+struct WideI32(__m256i);
+
+impl WideI32 {
+    fn new(e7: i32, e6: i32, e5: i32, e4: i32, e3: i32, e2: i32, e1: i32, e0: i32) -> Self {
+        Self(unsafe { _mm256_set_epi32(e7, e6, e5, e4, e3, e2, e1, e0) })
+    }
+
+    fn splat(x: i32) -> Self {
+        Self(unsafe { _mm256_set1_epi32(x) })
+    }
+
+    fn select(x: WideI32, y: WideI32, mask: WideF32) -> WideI32 {
+        WideI32(unsafe {
+            _mm256_castps_si256(_mm256_blendv_ps(
+                _mm256_castsi256_ps(x.0),
+                _mm256_castsi256_ps(y.0),
+                mask.0,
+            ))
+        })
+    }
+}
+
+impl Add for WideI32 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(unsafe { _mm256_add_epi32(self.0, other.0) })
+    }
+}
+
+impl AddAssign for WideI32 {
+    fn add_assign(&mut self, other: Self) {
+        self.0 = unsafe { _mm256_add_epi32(self.0, other.0) }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 struct WideF32(__m256);
 
 impl WideF32 {
-    const WIDTH: usize = 8;
-
     fn load(x: &[f32]) -> Self {
-        assert!(x.len() >= Self::WIDTH);
+        debug_assert!(x.len() >= SIMD_WIDTH);
         // aligning this would require some hoops on vec alloc
         // https://stackoverflow.com/questions/60180121/how-do-i-allocate-a-vecu8-that-is-aligned-to-the-size-of-the-cache-line
         Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
-    }
-
-    fn new(e7: f32, e6: f32, e5: f32, e4: f32, e3: f32, e2: f32, e1: f32, e0: f32) -> Self {
-        Self(unsafe { _mm256_set_ps(e7, e6, e5, e4, e3, e2, e1, e0) })
     }
 
     fn any(&self) -> bool {
@@ -87,40 +119,38 @@ impl WideF32 {
     }
 
     fn hmin(&self) -> f32 {
+        // TODO(eli): tests
         unsafe {
             /*
-            swap lanes, take min
-              1 2 3 4 5 6 7 8
-              5 6 7 8 1 2 3 4
-            = 1 2 3 4 1 2 3 4
+            This can be done entirely in avx with permute2f128, but that is allegedly very
+            slow on AMD prior to Zen2 (and is anecdotally slower on my Intels as well)
 
-            1st permute, take min
-            3
-            2
-            1
-            0
+            initial m256
+            1 2 3 4 5 6 7 8
 
-            00 01 10 11 = 27
+            extract half, cast the other half down to m128, min
+              1 2 3 4
+              5 6 7 8
+            = 1 2 3 4
 
-              1 2 3 4 1 2 3 4
-              4 3 2 1 4 3 2 1
-            = 1 2 2 1 1 2 2 1
+            permute backwards, min
+              1 2 3 4
+              4 3 2 1
+            = 1 2 2 1
 
-
-            unpackhi, take min
-            (this works only because we extract a scalar instead of a vec)
-              1 2 2 1 1 2 2 1
-              2 2 1 1 2 2 1 1
-            = 1 2 1 1 1 2 1 1
+            unpack hi, min
+              1 2 2 1
+              1 1 2 2
+            = 1 1 2 1
             */
             let x = self.0;
-            let y = _mm256_permute2f128_ps(x, x, 1);
-            let m1 = _mm256_min_ps(x, y);
-            let m2 = _mm256_permute_ps(m1, 27);
-            let m2 = _mm256_min_ps(m1, m2);
-            let m3 = _mm256_unpackhi_ps(m2, m2);
-            let m = _mm256_min_ps(m2, m3);
-            _mm256_cvtss_f32(m)
+            let y = _mm256_extractf128_ps(x, 1);
+            let m1 = _mm_min_ps(_mm256_castps256_ps128(x), y);
+            let m2 = _mm_permute_ps(m1, 27);
+            let m2 = _mm_min_ps(m1, m2);
+            let m3 = _mm_unpackhi_ps(m2, m2);
+            let m = _mm_min_ps(m2, m3);
+            _mm_cvtss_f32(m)
         }
     }
 
@@ -430,21 +460,21 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
         let oy = WideF32::splat(origin.1);
         let oz = WideF32::splat(origin.2);
         let mut hit = None;
-        let mut hits = WideF32::splat(f32::MAX);
+        let mut hits = WideI32::splat(-1);
         let mut hit_dists = WideF32::splat(f32::MAX);
 
         let dirx = WideF32::splat(dir.0);
         let diry = WideF32::splat(dir.1);
         let dirz = WideF32::splat(dir.2);
         // TODO(eli): should be a wideu32
-        let mut wide_ids = WideF32::new(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0);
+        let mut wide_ids = WideI32::new(7, 6, 5, 4, 3, 2, 1, 0);
 
         // TODO(eli): egregious bounds checking here
-        for i in (0..spheres.len()).step_by(WideF32::WIDTH) {
-            let wide_xs = WideF32::load(&spheres.xs[i..i + WideF32::WIDTH]);
-            let wide_ys = WideF32::load(&spheres.ys[i..i + WideF32::WIDTH]);
-            let wide_zs = WideF32::load(&spheres.zs[i..i + WideF32::WIDTH]);
-            let wide_rsqrds = WideF32::load(&spheres.rsqrds[i..i + WideF32::WIDTH]);
+        for i in (0..spheres.len()).step_by(SIMD_WIDTH) {
+            let wide_xs = WideF32::load(&spheres.xs[i..i + SIMD_WIDTH]);
+            let wide_ys = WideF32::load(&spheres.ys[i..i + SIMD_WIDTH]);
+            let wide_zs = WideF32::load(&spheres.zs[i..i + SIMD_WIDTH]);
+            let wide_rsqrds = WideF32::load(&spheres.rsqrds[i..i + SIMD_WIDTH]);
 
             let sphere_relative_x = wide_xs - ox;
             let sphere_relative_y = wide_ys - oy;
@@ -465,12 +495,11 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
 
                 // t0 if hit, else t1
                 let t = WideF32::select(t1, t0, t0.gt(WideF32::splat(TOLERANCE)));
-                // TODO(eli): it would be better to represent masks as a custom type or a wideu32
                 let mask = discrmask & t.gt(WideF32::splat(TOLERANCE)) & t.lt(hit_dists);
-                hits = WideF32::select(hits, wide_ids, mask);
+                hits = WideI32::select(hits, wide_ids, mask);
                 hit_dists = WideF32::select(hit_dists, t, mask);
             }
-            wide_ids += WideF32::splat(WideF32::WIDTH as f32);
+            wide_ids += WideI32::splat(SIMD_WIDTH as i32);
         }
         let hmin = hit_dists.hmin();
         if hmin < f32::MAX {
@@ -478,7 +507,7 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
             let m = unsafe { _mm256_movemask_ps(minmask.0) };
             let min_idx = m.trailing_zeros() as usize;
 
-            let hit_ids_arr: [f32; 8] = unsafe { std::mem::transmute(hits.0) };
+            let hit_ids_arr: [i32; 8] = unsafe { std::mem::transmute(hits.0) };
             let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
             hit = Some((hit_dists_arr[min_idx], hit_ids_arr[min_idx] as usize))
         }
@@ -527,6 +556,9 @@ thread_local! {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // flush denormals to zero
+    unsafe { _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON) };
+
     let mut args = Arguments::from_env();
     let rays_per_pixel = args.opt_value_from_str(["-r", "--rays"])?.unwrap_or(100);
     let rays_per_batch = args
