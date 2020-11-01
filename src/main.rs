@@ -459,14 +459,12 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
         let ox = WideF32::splat(origin.0);
         let oy = WideF32::splat(origin.1);
         let oz = WideF32::splat(origin.2);
-        let mut hit = None;
         let mut hits = WideI32::splat(-1);
         let mut hit_dists = WideF32::splat(f32::MAX);
 
         let dirx = WideF32::splat(dir.0);
         let diry = WideF32::splat(dir.1);
         let dirz = WideF32::splat(dir.2);
-        // TODO(eli): should be a wideu32
         let mut wide_ids = WideI32::new(7, 6, 5, 4, 3, 2, 1, 0);
 
         // TODO(eli): egregious bounds checking here
@@ -509,21 +507,16 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
 
             let hit_ids_arr: [i32; 8] = unsafe { std::mem::transmute(hits.0) };
             let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
-            hit = Some((hit_dists_arr[min_idx], hit_ids_arr[min_idx] as usize))
-        }
 
-        match (hit, bounces) {
-            (None, _) => {
-                color += reflectance * bg.emit_color;
+            let id = hit_ids_arr[min_idx] as usize;
+            let hit_dist = hit_dists_arr[min_idx];
+            let mat = &spheres.mats[id];
+
+            if bounces == 0 {
+                color += reflectance * mat.emit_color;
                 break;
-            }
-            (Some((_, id)), 0) => {
-                color += reflectance * spheres.mats[id].emit_color;
-                break;
-            }
-            (Some((hit_dist, id)), _) => {
+            } else {
                 bounces -= 1;
-                let mat = &spheres.mats[id];
                 color += reflectance * mat.emit_color;
                 reflectance *= mat.reflect_color;
                 let hit_point = origin + dir * hit_dist;
@@ -540,8 +533,11 @@ fn cast(bg: &Material, spheres: &Spheres, mut origin: V3, mut dir: V3, mut bounc
                         let r = (1.0 - z * z).sqrt();
                         V3(r * a.cos(), r * a.sin(), z)
                     }
-                };
+                }
             }
+        } else {
+            color += reflectance * bg.emit_color;
+            break;
         }
     }
     color
