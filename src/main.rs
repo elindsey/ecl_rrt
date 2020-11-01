@@ -13,55 +13,6 @@ use std::{
 const TOLERANCE: f32 = 0.0001;
 const SIMD_WIDTH: usize = 8;
 
-struct Spheres {
-    xs: Vec<f32>,
-    ys: Vec<f32>,
-    zs: Vec<f32>,
-    rsqrds: Vec<f32>,
-    mats: Vec<Material>,
-}
-
-impl Spheres {
-    fn new(spheres: Vec<Sphere>) -> Self {
-        let len = (spheres.len() + SIMD_WIDTH - 1) / SIMD_WIDTH * SIMD_WIDTH;
-
-        let mut me = Self {
-            xs: Vec::with_capacity(len),
-            ys: Vec::with_capacity(len),
-            zs: Vec::with_capacity(len),
-            rsqrds: Vec::with_capacity(len),
-            mats: Vec::with_capacity(len),
-        };
-
-        for s in spheres {
-            me.xs.push(s.p.0);
-            me.ys.push(s.p.1);
-            me.zs.push(s.p.2);
-            me.rsqrds.push(s.rsqrd);
-            me.mats.push(s.m);
-        }
-
-        // pad everything out to the simd width
-        me.xs.resize(len, 0.0);
-        me.ys.resize(len, 0.0);
-        me.zs.resize(len, 0.0);
-        me.rsqrds.resize(len, 0.0);
-
-        let default_mat = Material {
-            emit_color: V3(0.0, 0.0, 0.0),
-            reflect_color: V3(0.0, 0.0, 0.0),
-            t: MaterialType::Specular,
-        };
-        me.mats.resize(len, default_mat);
-
-        me
-    }
-
-    fn len(&self) -> usize {
-        self.xs.len()
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 struct WideI32(__m256i);
 
@@ -411,6 +362,55 @@ impl Sphere {
     }
 }
 
+struct Spheres {
+    xs: Vec<f32>,
+    ys: Vec<f32>,
+    zs: Vec<f32>,
+    rsqrds: Vec<f32>,
+    mats: Vec<Material>,
+}
+
+impl Spheres {
+    fn new(spheres: Vec<Sphere>) -> Self {
+        let len = (spheres.len() + SIMD_WIDTH - 1) / SIMD_WIDTH * SIMD_WIDTH;
+
+        let mut me = Self {
+            xs: Vec::with_capacity(len),
+            ys: Vec::with_capacity(len),
+            zs: Vec::with_capacity(len),
+            rsqrds: Vec::with_capacity(len),
+            mats: Vec::with_capacity(len),
+        };
+
+        for s in spheres {
+            me.xs.push(s.p.0);
+            me.ys.push(s.p.1);
+            me.zs.push(s.p.2);
+            me.rsqrds.push(s.rsqrd);
+            me.mats.push(s.m);
+        }
+
+        // pad everything out to the simd width
+        me.xs.resize(len, 0.0);
+        me.ys.resize(len, 0.0);
+        me.zs.resize(len, 0.0);
+        me.rsqrds.resize(len, 0.0);
+
+        let default_mat = Material {
+            emit_color: V3(0.0, 0.0, 0.0),
+            reflect_color: V3(0.0, 0.0, 0.0),
+            t: MaterialType::Specular,
+        };
+        me.mats.resize(len, default_mat);
+
+        me
+    }
+
+    fn len(&self) -> usize {
+        self.xs.len()
+    }
+}
+
 // https://entropymine.com/imageworsener/srgbformula/
 fn linear_to_srgb(x: f32) -> f32 {
     if x < 0.0 {
@@ -536,8 +536,8 @@ fn cast(
             let m = unsafe { _mm256_movemask_ps(minmask.0) };
             let min_idx = m.trailing_zeros() as usize;
 
-            let hit_ids_arr: [i32; 8] = unsafe { std::mem::transmute(hits.0) };
-            let hit_dists_arr: [f32; 8] = unsafe { std::mem::transmute(hit_dists.0) };
+            let hit_ids_arr: [i32; SIMD_WIDTH] = unsafe { std::mem::transmute(hits.0) };
+            let hit_dists_arr: [f32; SIMD_WIDTH] = unsafe { std::mem::transmute(hit_dists.0) };
 
             let id = hit_ids_arr[min_idx] as usize;
             let hit_dist = hit_dists_arr[min_idx];
