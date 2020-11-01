@@ -487,9 +487,9 @@ fn cast(
 
     loop {
         debug_assert!(dir.is_unit_vector());
-        let ox = WideF32::splat(origin.0);
-        let oy = WideF32::splat(origin.1);
-        let oz = WideF32::splat(origin.2);
+        let origin_xs = WideF32::splat(origin.0);
+        let origin_ys = WideF32::splat(origin.1);
+        let origin_zs = WideF32::splat(origin.2);
         let mut hits = WideI32::splat(-1);
         let mut hit_dists = WideF32::splat(f32::MAX);
 
@@ -500,20 +500,20 @@ fn cast(
 
         // TODO(eli): egregious bounds checking here
         for i in (0..spheres.len()).step_by(SIMD_WIDTH) {
-            let wide_xs = WideF32::load(&spheres.xs[i..i + SIMD_WIDTH]);
-            let wide_ys = WideF32::load(&spheres.ys[i..i + SIMD_WIDTH]);
-            let wide_zs = WideF32::load(&spheres.zs[i..i + SIMD_WIDTH]);
-            let wide_rsqrds = WideF32::load(&spheres.rsqrds[i..i + SIMD_WIDTH]);
+            let sphere_xs = WideF32::load(&spheres.xs[i..i + SIMD_WIDTH]);
+            let sphere_ys = WideF32::load(&spheres.ys[i..i + SIMD_WIDTH]);
+            let sphere_zs = WideF32::load(&spheres.zs[i..i + SIMD_WIDTH]);
+            let sphere_rsqrds = WideF32::load(&spheres.rsqrds[i..i + SIMD_WIDTH]);
 
-            let sphere_relative_x = wide_xs - ox;
-            let sphere_relative_y = wide_ys - oy;
-            let sphere_relative_z = wide_zs - oz;
-            let neg_b =
-                dirx * sphere_relative_x + diry * sphere_relative_y + dirz * sphere_relative_z;
-            let c = sphere_relative_x * sphere_relative_x
-                + sphere_relative_y * sphere_relative_y
-                + sphere_relative_z * sphere_relative_z
-                - wide_rsqrds;
+            // this should be sphere_relative_origin = origin - sphere_origin
+            // the math is flipped backwards because it saves us having to negate the b term
+            let relative_xs = sphere_xs - origin_xs;
+            let relative_ys = sphere_ys - origin_ys;
+            let relative_zs = sphere_zs - origin_zs;
+            let neg_b = dirx * relative_xs + diry * relative_ys + dirz * relative_zs;
+            let c =
+                relative_xs * relative_xs + relative_ys * relative_ys + relative_zs * relative_zs
+                    - sphere_rsqrds;
             let discr = neg_b * neg_b - c;
 
             let discrmask = discr.gt(WideF32::splat(0.0));
