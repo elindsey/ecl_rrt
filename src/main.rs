@@ -505,8 +505,8 @@ fn cast(
             let sphere_zs = WideF32::load(&spheres.zs[i..i + SIMD_WIDTH]);
             let sphere_rsqrds = WideF32::load(&spheres.rsqrds[i..i + SIMD_WIDTH]);
 
-            // this should be sphere_relative_origin = origin - sphere_origin
-            // the math is flipped backwards because it saves us having to negate the b term
+            // this is sphere_relative_origin = origin - sphere_origin
+            // but the math is flipped backwards because it saves us having to negate the b term
             let relative_xs = sphere_xs - origin_xs;
             let relative_ys = sphere_ys - origin_ys;
             let relative_zs = sphere_zs - origin_zs;
