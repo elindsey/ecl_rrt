@@ -428,7 +428,29 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
+thread_local! {
+    static THREAD_RNG: Cell<u64> = {
+        let mut buf = [0u8; 8];
+        getrandom::getrandom(&mut buf).unwrap();
+        Cell::new(u64::from_le_bytes(buf))
+    };
+}
+
+fn thread_rand() -> u32 {
+    // TODO(eli): thread local perf is terrible; causes function call and branching
+    THREAD_RNG.with(|rng_cell| {
+        let mut state = rng_cell.get();
+        let randu = pcg(&mut state);
+        rng_cell.set(state);
+        randu
+    })
+}
+
 // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
+// xorshift isn't great, but is good enough for our purposes and has two
+// nice properties:
+// 1. it only needs a u32 of state to generate a u32
+// 2. it's easy to SIMD
 fn xorshift(state: &mut u32) -> u32 {
     debug_assert!(*state != 0, "xorshift cannot be seeded with 0");
     let mut x = *state;
@@ -444,16 +466,6 @@ fn pcg(state: &mut u64) -> u32 {
     let s = *state;
     *state = s.wrapping_mul(6364136223846793005);
     (((s >> 22) ^ s) >> ((s >> 61) + 22)) as u32
-}
-
-fn thread_rand() -> u32 {
-    // TODO(eli): thread local perf is terrible; causes function call and branching
-    THREAD_RNG.with(|rng_cell| {
-        let mut state = rng_cell.get();
-        let randu = pcg(&mut state);
-        rng_cell.set(state);
-        randu
-    })
 }
 
 fn randf(state: &mut u32) -> f32 {
@@ -564,14 +576,6 @@ fn cast(
         }
     }
     color
-}
-
-thread_local! {
-    static THREAD_RNG: Cell<u64> = {
-        let mut buf = [0u8; 8];
-        getrandom::getrandom(&mut buf).unwrap();
-        Cell::new(u64::from_le_bytes(buf))
-    };
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
