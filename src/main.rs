@@ -55,7 +55,7 @@ struct WideF32(__m256);
 
 impl WideF32 {
     fn load(x: &[f32]) -> Self {
-        debug_assert!(x.len() >= SIMD_WIDTH);
+        assert!(x.len() >= SIMD_WIDTH);
         // aligning this would require some hoops on vec alloc
         // https://stackoverflow.com/questions/60180121/how-do-i-allocate-a-vecu8-that-is-aligned-to-the-size-of-the-cache-line
         Self(unsafe { _mm256_loadu_ps(x.as_ptr()) })
@@ -628,8 +628,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Sphere::new(V3(-3.0, -6.0, 0.0), 0.3, right.clone()),
         Sphere::new(V3(-3.0, -5.0, 2.0), 0.5, left.clone()),
         Sphere::new(V3(3.0, -3.0, 0.8), 1.0, right.clone()),
-        Sphere::new(V3(-3.0, -3.0, 2.0), 0.5, left),
-        //Sphere::new(V3(5.0, -3.0, 0.8), 1.0, right),
+        Sphere::new(V3(-3.0, -3.0, 2.0), 0.5, left.clone()),
+        Sphere::new(V3(5.0, -3.0, 0.8), 1.0, right),
+        Sphere::new(V3(3.0, -3.0, 2.0), 0.5, left),
     ]);
 
     let width = 1920;
