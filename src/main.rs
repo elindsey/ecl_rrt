@@ -10,8 +10,6 @@ use std::{
     time::Instant,
 };
 
-// TODO(eli): add config check for avx, avx2 and fma
-
 const TOLERANCE: f32 = 0.0001;
 const SIMD_WIDTH: usize = 8;
 
@@ -72,7 +70,6 @@ impl WideF32 {
     }
 
     fn hmin(&self) -> f32 {
-        // TODO(eli): tests
         unsafe {
             /*
             This can be done entirely in avx with permute2f128, but that is allegedly very
