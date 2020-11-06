@@ -25,8 +25,8 @@ impl WideI32 {
         Self(unsafe { _mm256_set1_epi32(x) })
     }
 
-    fn select(x: WideI32, y: WideI32, mask: WideF32) -> WideI32 {
-        WideI32(unsafe {
+    fn select(x: WideI32, y: WideI32, mask: WideF32) -> Self {
+        Self(unsafe {
             _mm256_castps_si256(_mm256_blendv_ps(
                 _mm256_castsi256_ps(x.0),
                 _mm256_castsi256_ps(y.0),
@@ -108,8 +108,8 @@ impl WideF32 {
         Self(unsafe { _mm256_set1_ps(x) })
     }
 
-    fn select(x: WideF32, y: WideF32, mask: WideF32) -> WideF32 {
-        WideF32(unsafe { _mm256_blendv_ps(x.0, y.0, mask.0) })
+    fn select(x: WideF32, y: WideF32, mask: WideF32) -> Self {
+        Self(unsafe { _mm256_blendv_ps(x.0, y.0, mask.0) })
     }
 
     fn sqrt(&self) -> Self {
