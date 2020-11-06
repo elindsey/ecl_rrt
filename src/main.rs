@@ -116,6 +116,7 @@ impl WideF32 {
         Self(unsafe { _mm256_sqrt_ps(self.0) })
     }
 
+    #[allow(dead_code)]
     fn rsqrt(&self) -> Self {
         Self(unsafe { _mm256_rsqrt_ps(self.0) })
     }
@@ -124,6 +125,7 @@ impl WideF32 {
     // https://en.wikipedia.org/wiki/Methods_of_computing_square_roots#Iterative_methods_for_reciprocal_square_roots
     // Note: on many architectures this is significantly faster than the sqrt intrinsic. But this is not so on Skylake
     // for this program: approx_sqrt crowds the ports with additional mul/subs so is net slower
+    #[allow(dead_code)]
     fn approx_sqrt(self) -> Self {
         let half = WideF32::splat(0.5);
         let three = WideF32::splat(3.0);
@@ -465,6 +467,7 @@ fn rand_seed() -> u32 {
     u32::from_le_bytes(buf)
 }
 
+#[allow(dead_code)]
 fn thread_rand() -> u32 {
     // TODO(eli): thread local perf is terrible; causes function call and branching
     THREAD_RNG.with(|rng_cell| {
@@ -491,6 +494,7 @@ fn xorshift(state: &mut u32) -> u32 {
 }
 
 // pcg xsh rs 64/32 (mcg)
+#[allow(dead_code)]
 fn pcg(state: &mut u64) -> u32 {
     let s = *state;
     *state = s.wrapping_mul(6364136223846793005);
