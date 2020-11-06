@@ -11,3 +11,6 @@ image = { version = "0.23", default-features = false, features = ["png"] }
 getrandom = "0.2.0"
 rayon = "1.4"
 pico-args = "0.3.4"
+
+[profile.release]
+debug = true
