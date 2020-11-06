@@ -10,6 +10,8 @@ use std::{
     time::Instant,
 };
 
+// TODO(eli): add config check for avx, avx2 and fma
+
 const TOLERANCE: f32 = 0.0001;
 const SIMD_WIDTH: usize = 8;
 
@@ -143,6 +145,15 @@ impl WideF32 {
 
     fn eq(&self, other: Self) -> Self {
         Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_EQ_OQ) })
+    }
+
+    // TODO(eli): _mm256_fmsub_ps
+    fn mul_add(x: Self, y: Self, z: Self) -> Self {
+        Self(unsafe { _mm256_fmadd_ps(x.0, y.0, z.0) })
+    }
+
+    fn mul_sub(x: Self, y: Self, z: Self) -> Self {
+        Self(unsafe { _mm256_fmsub_ps(x.0, y.0, z.0) })
     }
 }
 
@@ -531,11 +542,13 @@ fn cast(
             let relative_xs = sphere_xs - origin_xs;
             let relative_ys = sphere_ys - origin_ys;
             let relative_zs = sphere_zs - origin_zs;
-            let neg_b = dir_x * relative_xs + dir_y * relative_ys + dir_z * relative_zs;
-            let c =
-                relative_xs * relative_xs + relative_ys * relative_ys + relative_zs * relative_zs
-                    - sphere_rsqrds;
-            let discr = neg_b * neg_b - c;
+            let neg_b = dir_x * relative_xs;
+            let neg_b = WideF32::mul_add(dir_y, relative_ys, neg_b);
+            let neg_b = WideF32::mul_add(dir_z, relative_zs, neg_b);
+            let c = WideF32::mul_sub(relative_xs, relative_xs, sphere_rsqrds);
+            let c = WideF32::mul_add(relative_ys, relative_ys, c);
+            let c = WideF32::mul_add(relative_zs, relative_zs, c);
+            let discr = WideF32::mul_sub(neg_b, neg_b, c);
 
             let discrmask = discr.gt(WideF32::splat(0.0));
             if discrmask.any() {
