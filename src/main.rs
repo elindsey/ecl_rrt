@@ -1,9 +1,9 @@
+use crossbeam_queue::ArrayQueue;
+use crossbeam_utils::thread;
 use pico_args::Arguments;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::arch::x86_64::*;
 use std::{
     cell::Cell,
-    cmp,
     f32::consts::PI,
     ops::Neg,
     ops::{Add, AddAssign, BitAnd, BitOr, Div, Mul, MulAssign, Sub},
@@ -147,7 +147,6 @@ impl WideF32 {
         Self(unsafe { _mm256_cmp_ps(self.0, other.0, _CMP_EQ_OQ) })
     }
 
-    // TODO(eli): _mm256_fmsub_ps
     fn mul_add(x: Self, y: Self, z: Self) -> Self {
         Self(unsafe { _mm256_fmadd_ps(x.0, y.0, z.0) })
     }
@@ -463,6 +462,12 @@ thread_local! {
     };
 }
 
+fn rand_seed() -> u32 {
+    let mut buf = [0u8; 4];
+    getrandom::getrandom(&mut buf).unwrap();
+    u32::from_le_bytes(buf)
+}
+
 fn thread_rand() -> u32 {
     // TODO(eli): thread local perf is terrible; causes function call and branching
     THREAD_RNG.with(|rng_cell| {
@@ -512,9 +517,10 @@ fn cast(
     mut origin: V3,
     mut dir: V3,
     mut bounces: u32,
-) -> V3 {
+) -> (V3, u32) {
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
+    let orig_bounces = bounces;
 
     loop {
         debug_assert!(dir.is_unit_vector());
@@ -604,7 +610,7 @@ fn cast(
             break;
         }
     }
-    color
+    (color, orig_bounces - bounces)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -613,19 +619,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = Arguments::from_env();
     let rays_per_pixel = args.opt_value_from_str(["-r", "--rays"])?.unwrap_or(100);
-    let rays_per_batch = args
-        .opt_value_from_str(["-b", "--batch"])?
-        .unwrap_or(rays_per_pixel);
     let bounces = args.opt_value_from_str("--bounces")?.unwrap_or(8);
     let filename = args
         .opt_value_from_str("-o")?
         .unwrap_or("out.png".to_string());
     args.finish()?;
-
-    assert!(
-        rays_per_batch <= rays_per_pixel,
-        "number of rays in batch cannot exceed total rays"
-    );
 
     // Materials
     let bg = Material {
@@ -677,53 +675,90 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         width as f32 / height as f32,
     );
 
-    let batches = if rays_per_pixel % rays_per_batch == 0 {
-        rays_per_pixel / rays_per_batch
-    } else {
-        rays_per_pixel / rays_per_batch + 1
-    };
+    let threads = num_cpus::get();
+    let chunk_size = 1024;
+    assert!(width * height % chunk_size == 0);
 
     let start = Instant::now();
-    let mut rays_shot = 0;
-    for b in 0..batches {
-        let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
+    {
+        let jobs = ArrayQueue::new(width * height / chunk_size);
+        pixels
+            .chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(i, chunk)| {
+                jobs.push((i, chunk)).unwrap();
+            });
 
-        pixels.par_iter_mut().enumerate().for_each_init(
-            || thread_rand(),
-            |rng_state, (i, color)| {
-                let image_x = (i % width) as f32;
-                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..batch_size {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf(rng_state);
-                    let rand_y = randf(rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+        thread::scope(|s| {
+            let handles: Vec<_> = (0..threads)
+                .map(|_| {
+                    s.spawn(|_| {
+                        let mut rng_state = rand_seed();
+                        let mut ray_count = 0;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
-                }
-            },
-        );
-        rays_shot += batch_size;
-        println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
+                        while let Some((i, chunk)) = jobs.pop() {
+                            let mut i = i * chunk.len();
+                            for color in chunk {
+                                let image_x = (i % width) as f32;
+                                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                                i += 1;
+                                for _ in 0..rays_per_pixel {
+                                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                                    let rand_x = randf(&mut rng_state);
+                                    let rand_y = randf(&mut rng_state);
+                                    let film_x =
+                                        cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                                    let film_y =
+                                        cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                                    let film_p = cam.film_lower_left + film_x + film_y;
 
-        let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
-        for p in &pixels {
-            let c = *p / rays_shot as f32;
-            buf.push((255.0 * linear_to_srgb(c.0)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.1)) as u8);
-            buf.push((255.0 * linear_to_srgb(c.2)) as u8);
-        }
+                                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                                    // then add a random [0,1) float
+                                    let ray_dir = (film_p - cam.origin).normalize();
+                                    let (c, r) = cast(
+                                        &mut rng_state,
+                                        &bg,
+                                        &spheres,
+                                        cam.origin,
+                                        ray_dir,
+                                        bounces,
+                                    );
+                                    *color += c;
+                                    ray_count += r;
+                                }
+                                *color = *color / rays_per_pixel as f32;
+                            }
+                        }
+                        ray_count
+                    })
+                })
+                .collect();
 
-        let f = format!("{}-{}", b, filename);
-        image::save_buffer(f, &buf, width as u32, height as u32, image::ColorType::Rgb8)?;
+            let total_rays_shot: u32 = handles.into_iter().map(|h| h.join().unwrap()).sum();
+
+            println!(
+                "{:.3} Mray/s",
+                total_rays_shot as f64 / 1_000_000.0 / start.elapsed().as_secs_f64()
+            );
+        })
+        .unwrap();
     }
+
+    let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
+    for p in &pixels {
+        buf.push((255.0 * linear_to_srgb(p.0)) as u8);
+        buf.push((255.0 * linear_to_srgb(p.1)) as u8);
+        buf.push((255.0 * linear_to_srgb(p.2)) as u8);
+    }
+
+    image::save_buffer(
+        filename,
+        &buf,
+        width as u32,
+        height as u32,
+        image::ColorType::Rgb8,
+    )?;
     println!("Rendering took {:.3}s", start.elapsed().as_secs_f32());
     Ok(())
 }
