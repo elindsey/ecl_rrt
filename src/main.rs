@@ -1,5 +1,7 @@
 use pico_args::Arguments;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
+};
 use std::arch::x86_64::*;
 use std::{
     cell::Cell,
@@ -688,28 +690,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for b in 0..batches {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
-        pixels.par_iter_mut().enumerate().for_each_init(
-            || thread_rand(),
-            |rng_state, (i, color)| {
-                let image_x = (i % width) as f32;
-                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..batch_size {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf(rng_state);
-                    let rand_y = randf(rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+        pixels
+            .chunks_mut(256)
+            .enumerate()
+            .par_bridge()
+            .for_each_init(
+                || thread_rand(),
+                |rng_state, (i, chunk)| {
+                    let i = i * 256;
+                    for color in chunk {
+                        let image_x = (i % width) as f32;
+                        let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                        for _ in 0..batch_size {
+                            // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                            let rand_x = randf(rng_state);
+                            let rand_y = randf(rng_state);
+                            let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                            let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                            let film_p = cam.film_lower_left + film_x + film_y;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
-                }
-            },
-        );
+                            // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                            // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                            // then add a random [0,1) float
+                            let ray_p = cam.origin;
+                            let ray_dir = (film_p - cam.origin).normalize();
+                            *color += cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
+                        }
+                    }
+                },
+            );
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
 
