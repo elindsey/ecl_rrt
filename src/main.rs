@@ -1,4 +1,4 @@
-use crossbeam_queue::ArrayQueue;
+use crossbeam_deque::Worker;
 use crossbeam_utils::thread;
 use pico_args::Arguments;
 use std::arch::x86_64::*;
@@ -682,54 +682,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     {
-        let jobs = ArrayQueue::new(width * height / chunk_size);
-        pixels
-            .chunks_mut(chunk_size)
-            .enumerate()
-            .for_each(|(i, chunk)| {
-                jobs.push((i, chunk)).unwrap();
-            });
+        let (workers, stealers): (Vec<_>, Vec<_>) = (0..threads)
+            .map(|_| {
+                let worker = Worker::new_fifo();
+                let stealer = worker.stealer();
+                (worker, stealer)
+            })
+            .unzip();
+
+        let mut idx = 0;
+        for (i, p) in pixels.iter_mut().enumerate() {
+            workers[idx].push((i, p));
+            idx += 1;
+            idx %= threads;
+        }
 
         thread::scope(|s| {
-            let handles: Vec<_> = (0..threads)
-                .map(|_| {
+            let handles: Vec<_> = workers
+                .into_iter()
+                .map(|w| {
                     s.spawn(|_| {
                         let mut rng_state = rand_seed();
                         let mut ray_count = 0;
+                        let w = w;
 
-                        while let Some((i, chunk)) = jobs.pop() {
-                            let mut i = i * chunk.len();
-                            for color in chunk {
-                                let image_x = (i % width) as f32;
-                                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                                i += 1;
-                                for _ in 0..rays_per_pixel {
-                                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                                    let rand_x = randf(&mut rng_state);
-                                    let rand_y = randf(&mut rng_state);
-                                    let film_x =
-                                        cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                                    let film_y =
-                                        cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                                    let film_p = cam.film_lower_left + film_x + film_y;
+                        while let Some((i, color)) = w.pop().or_else(|| {
+                            stealers
+                                .iter()
+                                .map(|s| s.steal_batch_and_pop(&w))
+                                .find(|s| !s.is_retry())
+                                .and_then(|s| s.success())
+                        }) {
+                            let image_x = (i % width) as f32;
+                            let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                            for _ in 0..rays_per_pixel {
+                                // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                                let rand_x = randf(&mut rng_state);
+                                let rand_y = randf(&mut rng_state);
+                                let film_x =
+                                    cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                                let film_y =
+                                    cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                                let film_p = cam.film_lower_left + film_x + film_y;
 
-                                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                                    // then add a random [0,1) float
-                                    let ray_dir = (film_p - cam.origin).normalize();
-                                    let (c, r) = cast(
-                                        &mut rng_state,
-                                        &bg,
-                                        &spheres,
-                                        cam.origin,
-                                        ray_dir,
-                                        bounces,
-                                    );
-                                    *color += c;
-                                    ray_count += r;
-                                }
-                                *color = *color / rays_per_pixel as f32;
+                                // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                                // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                                // then add a random [0,1) float
+                                let ray_dir = (film_p - cam.origin).normalize();
+                                let (c, r) = cast(
+                                    &mut rng_state,
+                                    &bg,
+                                    &spheres,
+                                    cam.origin,
+                                    ray_dir,
+                                    bounces,
+                                );
+                                *color += c;
+                                ray_count += r;
                             }
+                            *color = *color / rays_per_pixel as f32;
                         }
                         ray_count
                     })
