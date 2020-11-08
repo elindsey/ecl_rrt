@@ -726,8 +726,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         bounces,
                                     );
                                     *color += c;
-                                    ray_count += r as u64;
-                                    ray_count += 1;
+                                    ray_count += 1 + r as u64;
                                 }
                             }
                         }
