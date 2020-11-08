@@ -686,7 +686,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     let mut rays_shot = 0;
-    let mut count: u32 = 0;
+    let mut count = 0;
     for b in 0..batches {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
@@ -714,17 +714,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let ray_dir = (film_p - cam.origin).normalize();
                         let (c, r) = cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
                         *color += c;
-                        ray_count += r;
+                        ray_count += r + 1;
                     }
-                    ray_count
+                    ray_count as u64
                 },
             )
-            .sum::<u32>();
+            .sum::<u64>();
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
         println!(
             "{:.3} Mray/s",
-            count as f32 / 1_000_000.0 / start.elapsed().as_secs_f32()
+            count as f64 / 1_000_000.0 / start.elapsed().as_secs_f64()
         );
 
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
