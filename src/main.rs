@@ -511,6 +511,7 @@ fn randf_range(state: &mut u32, min: f32, max: f32) -> f32 {
     min + (max - min) * randf(state)
 }
 
+#[inline(always)]
 fn cast(
     rng_state: &mut u32,
     bg: &Material,
