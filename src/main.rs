@@ -695,7 +695,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|_| {
                     s.spawn(|_| {
                         let mut rng_state = rand_seed();
-                        let mut ray_count = 0;
+                        let mut ray_count: u64 = 0;
 
                         while let Some((i, chunk)) = jobs.pop() {
                             let mut i = i * chunk.len();
@@ -726,9 +726,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         bounces,
                                     );
                                     *color += c;
-                                    ray_count += r + 1;
+                                    ray_count += r as u64;
+                                    ray_count += 1;
                                 }
-                                *color = *color / rays_per_pixel as f32;
                             }
                         }
                         ray_count
@@ -736,7 +736,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect();
 
-            let total_rays_shot: u32 = handles.into_iter().map(|h| h.join().unwrap()).sum();
+            let total_rays_shot: u64 = handles.into_iter().map(|h| h.join().unwrap()).sum();
 
             println!(
                 "{:.3} Mray/s",
@@ -748,6 +748,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
     for p in &pixels {
+        let p = *p / rays_per_pixel as f32;
         buf.push((255.0 * linear_to_srgb(p.0)) as u8);
         buf.push((255.0 * linear_to_srgb(p.1)) as u8);
         buf.push((255.0 * linear_to_srgb(p.2)) as u8);
