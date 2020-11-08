@@ -726,7 +726,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         bounces,
                                     );
                                     *color += c;
-                                    ray_count += r;
+                                    ray_count += r + 1;
                                 }
                                 *color = *color / rays_per_pixel as f32;
                             }
