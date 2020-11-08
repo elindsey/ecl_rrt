@@ -512,9 +512,10 @@ fn cast(
     mut origin: V3,
     mut dir: V3,
     mut bounces: u32,
-) -> V3 {
+) -> (V3, u32) {
     let mut color = V3(0.0, 0.0, 0.0);
     let mut reflectance = V3(1.0, 1.0, 1.0);
+    let orig_bounces = bounces;
 
     loop {
         debug_assert!(dir.is_unit_vector());
@@ -604,7 +605,7 @@ fn cast(
             break;
         }
     }
-    color
+    (color, orig_bounces - bounces)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -685,33 +686,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     let mut rays_shot = 0;
+    let mut count: u32 = 0;
     for b in 0..batches {
         let batch_size = cmp::min(rays_per_batch, rays_per_pixel - rays_shot);
 
-        pixels.par_iter_mut().enumerate().for_each_init(
-            || thread_rand(),
-            |rng_state, (i, color)| {
-                let image_x = (i % width) as f32;
-                let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
-                for _ in 0..batch_size {
-                    // calculate ratio we've moved along the image (y/height), step proportionally within the film
-                    let rand_x = randf(rng_state);
-                    let rand_y = randf(rng_state);
-                    let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
-                    let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
-                    let film_p = cam.film_lower_left + film_x + film_y;
+        count += pixels
+            .par_iter_mut()
+            .enumerate()
+            .map_init(
+                || thread_rand(),
+                |rng_state, (i, color)| {
+                    let image_x = (i % width) as f32;
+                    let image_y = (height - (i / width) - 1) as f32; // flip image right-side-up
+                    let mut ray_count = 1;
+                    for _ in 0..batch_size {
+                        // calculate ratio we've moved along the image (y/height), step proportionally within the film
+                        let rand_x = randf(rng_state);
+                        let rand_y = randf(rng_state);
+                        let film_x = cam.x * cam.film_width * (image_x + rand_x) * inv_width;
+                        let film_y = cam.y * cam.film_height * (image_y + rand_y) * inv_height;
+                        let film_p = cam.film_lower_left + film_x + film_y;
 
-                    // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
-                    // to do this we take the start of that range (what we calculated as the image projecting onto our film),
-                    // then add a random [0,1) float
-                    let ray_p = cam.origin;
-                    let ray_dir = (film_p - cam.origin).normalize();
-                    *color += cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
-                }
-            },
-        );
+                        // remember that a pixel in float-space is a _range_. We want to send multiple rays within that range
+                        // to do this we take the start of that range (what we calculated as the image projecting onto our film),
+                        // then add a random [0,1) float
+                        let ray_p = cam.origin;
+                        let ray_dir = (film_p - cam.origin).normalize();
+                        let (c, r) = cast(rng_state, &bg, &spheres, ray_p, ray_dir, bounces);
+                        *color += c;
+                        ray_count += r;
+                    }
+                    ray_count
+                },
+            )
+            .sum::<u32>();
         rays_shot += batch_size;
         println!("Shot {} of {} rays", rays_shot, rays_per_pixel);
+        println!(
+            "{:.3} Mray/s",
+            count as f32 / 1_000_000.0 / start.elapsed().as_secs_f32()
+        );
 
         let mut buf: Vec<u8> = Vec::with_capacity(width * height * 3);
         for p in &pixels {
